@@ -4,27 +4,36 @@ FR-27: "Expose a read API so that topic data can be consumed by other Orange
 tools." It is priority C in the requirements, but the React frontend needs it,
 so it is built now and serves both.
 
-The API is READ-ONLY except for the two write paths the requirements demand:
-feedback capture (FR-23, FR-34, DR-15) and curator link confirmation (LK-06).
-Nothing here mutates a score or a topic — that is the pipeline's job, and
-keeping the boundary sharp is what makes SC-11 reproducibility checkable.
+Reads never write. Scores and topic content are still the pipeline's job, and
+keeping that boundary sharp is what makes SC-11 reproducibility checkable — but
+the write paths have grown past the two the requirements named (feedback capture
+under FR-23/FR-34/DR-15, curator link confirmation under LK-06) to include the
+derived artefacts a curator asks for by pressing a button, generation runs, and
+removing a space outright.
+
+Every `/api` path here requires a session (`radar.auth`). The bundle and the app
+shell do not: the login screen has to load before anyone can sign in, and there
+is nothing in a JavaScript file worth protecting. `/docs` and `/openapi.json` are
+FastAPI's own routes rather than this router's, so they stay open too — they
+describe the shape of the API and serve none of its data.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import bootstrap, internal
+from . import auth, bootstrap, deletion, internal
 from .brief import BriefBuilder, brief_for_topic, brief_path
 from .competition import CompetitionAnalyser, LEVEL_MEANING, competition_for_topic
 from .config import get_config
@@ -35,6 +44,9 @@ from .graph import LINK_MEANING, Linker
 from .pipeline.synthesis import GenerationConstraints
 from .llm import LLMClient
 from .pipeline.describe import DescriptionGenerator, description_for_topic
+from .presales import (PreSalesBuilder, collateral_for_topic, collateral_path,
+                       entry as collateral_entry, item_for as collateral_item,
+                       resolve_format as collateral_format)
 from .reference import ReferenceDataFetcher, reference_status
 from .scoping import MAX_MESSAGE_CHARS, MAX_MESSAGES, ScopingError, ScopingService
 from .sizing import MarketSizer, sizes_for_topic
@@ -45,22 +57,75 @@ from .readmodel import (NOT_A_GENERATION, SORTS, ReadModel, facet_counts, matche
 
 log = logging.getLogger(__name__)
 
+#: `/api` paths that answer before anybody has signed in. Everything else is
+#: behind `require_session` below.
+#:
+#: `session` is public and always 200 rather than 401-when-anonymous: it is the
+#: probe the frontend runs on every load, and a route whose *normal* answer for a
+#: signed-out visitor is an error makes a signed-out visitor indistinguishable
+#: from a broken server, in the logs and in the browser console alike.
+PUBLIC_API_PATHS = frozenset({
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/session",
+})
+
+
+def require_session(request: Request) -> None:
+    """Refuse an `/api` request that carries no valid session.
+
+    Mounted as an application-level dependency rather than as middleware, for two
+    reasons. It runs INSIDE FastAPI's exception handling, so a refusal is an
+    ordinary `HTTPException` with a `detail` the frontend already knows how to
+    read, and it is inside the CORS middleware, so a refusal still carries the
+    headers that let a browser see it. It also does not apply to the mounted
+    static files, which is correct: the bundle is not a secret and the login
+    screen is part of it.
+
+    Non-`/api` paths pass straight through — the app shell, the assets, and the
+    platform's liveness probe.
+    """
+    path = request.url.path
+    if not path.startswith("/api/") or path in PUBLIC_API_PATHS:
+        return
+    try:
+        user = _auth.session_user(request.cookies.get(auth.SESSION_COOKIE))
+    except Exception as exc:  # noqa: BLE001
+        # The session table lives in the same file as everything else, so an
+        # unusable database fails here first — for every route at once. A 503
+        # naming the startup error is diagnosable; a stack trace per endpoint is
+        # the same fault reported forty different ways.
+        log.error("Session lookup failed: %s", exc)
+        raise HTTPException(503, bootstrap.STARTUP_ERROR
+                            or f"The radar cannot read its session store: {exc}") from exc
+    if user is None:
+        raise HTTPException(401, "Your session has ended. Sign in to continue.")
+    # Endpoints that need to know who is asking read it from here rather than
+    # taking a second dependency and a second lookup.
+    request.state.user = user
+
+
 app = FastAPI(
     title="Orange Business Innovation Radar",
     description="Read API for the Opportunity Spaces / Innovation Radar MVP.",
     version="0.1.0",
+    dependencies=[Depends(require_session)],
 )
 
 # The React dev server runs on a different origin. In production the built
 # bundle is served from THIS app (see the static mount at the bottom of this
 # file), so the deployed origin needs no CORS entry at all — the list stays
 # scoped to the local dev servers.
+#
+# `allow_credentials` is on because the session lives in a cookie and a
+# cross-origin fetch drops cookies without it. That combination is only safe
+# against an explicit origin list — never against `*` — which is what this is.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
                    "http://localhost:5174", "http://127.0.0.1:5174"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -94,6 +159,16 @@ except Exception as exc:  # noqa: BLE001
 
 _read = ReadModel(_cfg, _db)
 _workflow = WorkflowService(_cfg, _db)
+_auth = auth.AuthService(_db)
+
+try:
+    # A fresh database has no accounts, and an app nobody can sign in to is
+    # indistinguishable from a broken one. Seeding runs only against an EMPTY
+    # user table — see `ensure_seed_user` for why that distinction matters.
+    _auth.ensure_seed_user()
+except Exception as exc:  # noqa: BLE001 — same rule as the schema call above
+    bootstrap.STARTUP_ERROR = bootstrap.STARTUP_ERROR or f"{type(exc).__name__}: {exc}"
+    log.error("Could not seed the initial account: %s", exc)
 
 
 def _llm() -> LLMClient:
@@ -107,6 +182,123 @@ def _vocab_payload(vocab) -> list[dict[str, Any]]:
         {"id": item.id, "label": item.label, "definition": item.definition}
         for item in vocab
     ]
+
+
+class LoginIn(BaseModel):
+    # Bounded so a sign-in attempt cannot be used to post a megabyte into the
+    # hashing function. 256 is far past any real password and far short of a
+    # denial-of-service.
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=1, max_length=256)
+
+
+def _cookie_secure(request: Request) -> bool:
+    """Whether to mark the session cookie `Secure`.
+
+    Marking it `Secure` over plain HTTP means the browser silently discards it
+    and nobody can sign in; NOT marking it in production means the session
+    travels in clear over any downgraded hop. Neither is a safe default, so the
+    scheme is read from the request — via `x-forwarded-proto` first, because App
+    Service terminates TLS at the front end and the origin request arrives as
+    HTTP. `RADAR_COOKIE_SECURE` overrides both for a deployment that knows
+    better than the headers do.
+    """
+    override = os.getenv("RADAR_COOKIE_SECURE")
+    if override is not None:
+        return override.strip().lower() in {"1", "true", "yes", "on"}
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return (forwarded or request.url.scheme) == "https"
+
+
+def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        auth.SESSION_COOKIE, token,
+        max_age=int(auth.IDLE_HOURS * 3600),
+        # HttpOnly so an injected script cannot read the session; SameSite=Lax so
+        # another origin's form cannot post here with the cookie attached, which
+        # is the CSRF defence this API relies on instead of a token.
+        httponly=True, samesite="lax", path="/",
+        secure=_cookie_secure(request),
+    )
+
+
+@app.post("/api/auth/login")
+def login(payload: LoginIn, request: Request, response: Response) -> dict[str, Any]:
+    """Exchange a username and password for a session cookie.
+
+    Public by construction — it is the one door — and throttled per account, so
+    the door is not also a guessing machine.
+    """
+    try:
+        token, user = _auth.login(payload.username, payload.password)
+    except auth.RateLimited as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except auth.AuthError as exc:
+        # 401 rather than 400: the credential was understood and rejected.
+        raise HTTPException(401, str(exc)) from exc
+    _set_session_cookie(response, request, token)
+    return {"user": user}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response) -> dict[str, Any]:
+    """End this session and clear the cookie.
+
+    Public and idempotent. Requiring a session to sign out means an expired one
+    cannot be cleaned up, which leaves a dead cookie in the browser and a user
+    looking at a screen that will not let them in or out.
+    """
+    _auth.logout(request.cookies.get(auth.SESSION_COOKIE))
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return {"signed_out": True}
+
+
+@app.get("/api/auth/session")
+def session(request: Request) -> dict[str, Any]:
+    """Who is signed in, if anyone. Always 200 — see `PUBLIC_API_PATHS`."""
+    user = _auth.session_user(request.cookies.get(auth.SESSION_COOKIE))
+    return {
+        "authenticated": user is not None,
+        "user": user,
+        # The frontend shows the password rules beside the field it enforces
+        # them on, rather than discovering them from a rejection.
+        "password_policy": {"min_length": auth.MIN_PASSWORD_CHARS},
+    }
+
+
+@app.post("/api/auth/password")
+def change_password(payload: PasswordChangeIn, request: Request,
+                    response: Response) -> dict[str, Any]:
+    """Change the signed-in account's password.
+
+    The current password is required even though the session already proves
+    identity: the session may be an unlocked laptop, and a password change is
+    the one action that locks its owner out.
+
+    Every OTHER session for the account is ended — the usual reason to change a
+    password is that somebody else might know the old one — and this one is
+    reissued, so the person who just typed it correctly twice is not signed out
+    of the tab they did it in.
+    """
+    user = getattr(request.state, "user", None)
+    if user is None:  # pragma: no cover — require_session has already run
+        raise HTTPException(401, "Sign in to change a password.")
+    try:
+        _auth.login(user["username"], payload.current_password)
+    except auth.AuthError as exc:
+        raise HTTPException(403, "That is not the current password.") from exc
+    try:
+        _auth.set_password(user["username"], payload.new_password)
+        token, refreshed = _auth.login(user["username"], payload.new_password)
+    except auth.AuthError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    _set_session_cookie(response, request, token)
+    return {"user": refreshed, "signed_out_elsewhere": True}
 
 
 @app.get("/api/meta")
@@ -212,6 +404,41 @@ def topic(topic_id: str) -> dict[str, Any]:
 def history(topic_id: str) -> dict[str, Any]:
     """Score trajectory with the weight-set comparability warning (FR-20, §4.6)."""
     return _read.history(topic_id)
+
+
+@app.get("/api/topics/{topic_id}/deletion-impact")
+def topic_deletion_impact(topic_id: str) -> dict[str, Any]:
+    """Everything a delete would take with it, without taking any of it.
+
+    A `GET` that reads and returns, so it sits inside the read-only rule. It
+    exists because the confirmation dialog has to name the consequence — thirteen
+    tables point at a space, and "are you sure?" over a number nobody was shown
+    is not a confirmation.
+    """
+    try:
+        return deletion.deletion_impact(_db, topic_id)
+    except deletion.TopicNotFound as exc:
+        raise HTTPException(404, f"No such topic: {topic_id}") from exc
+
+
+@app.delete("/api/topics/{topic_id}")
+def delete_topic(topic_id: str, request: Request) -> dict[str, Any]:
+    """Remove an opportunity space and everything attached to it.
+
+    The report it returns is the impact computed a moment before the delete, so
+    the caller can say what actually went rather than that something did. See
+    `radar.deletion` for what travels with a space, what deliberately does not
+    (the signals — they are shared evidence), and why a space that sat in a
+    portfolio plan is reported rather than refused.
+    """
+    try:
+        report = deletion.delete_topic(_db, topic_id)
+    except deletion.TopicNotFound as exc:
+        raise HTTPException(404, f"No such topic: {topic_id}") from exc
+    user = getattr(request.state, "user", None)
+    log.warning("%s deleted opportunity space %s",
+                (user or {}).get("username", "unknown"), topic_id)
+    return {**report, "deleted_by": (user or {}).get("username")}
 
 
 @app.get("/api/whitespace")
@@ -1039,6 +1266,106 @@ def brief_pdf(topic_id: str, download: bool = Query(False)) -> FileResponse:
             "Content-Disposition": f'{disposition}; filename="{meta.get("filename", path.name)}"',
             # The brief is regenerated in place, so a cached copy would show a
             # stale document at the same URL.
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/api/topics/{topic_id}/presales")
+def presales_index(topic_id: str) -> dict[str, Any]:
+    """The whole collateral catalogue for one space, each entry with its state.
+
+    Always the full catalogue, never only what has been built: this endpoint
+    backs a tab whose job is to say what COULD be produced as much as what has
+    been, and a list that starts empty is a list nobody presses a button on.
+    """
+    if _read.topic(topic_id) is None:
+        raise HTTPException(404, f"No such topic: {topic_id}")
+    return {"topic_id": topic_id, "items": collateral_for_topic(_db, topic_id)}
+
+
+@app.post("/api/topics/{topic_id}/presales/{kind}")
+def generate_presales(topic_id: str, kind: str,
+                      fmt: str | None = Query(None, description="pdf | docx | odt | pptx | odp | md"),
+                      force: bool = Query(False)) -> dict[str, Any]:
+    """Build one piece of collateral, generating its inputs if they are missing.
+
+    The expensive input is the narrative, and it is generated here rather than
+    demanded of the user: somebody who pressed "Generate" on a battlecard wants
+    a battlecard, not an error telling them to press a different button first.
+    Sizing and competition are cheap and deterministic, so they are simply
+    computed. A narrative that will not build is logged and the piece is
+    rendered without it, carrying a banner that says so — the same posture
+    `generate_brief` takes.
+    """
+    row = _db.query_one("SELECT * FROM opportunity_spaces WHERE id = ?", (topic_id,))
+    if row is None:
+        raise HTTPException(404, f"No such topic: {topic_id}")
+    try:
+        spec = collateral_entry(kind)
+        fmt = collateral_format(kind, fmt)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        # An unsupported format is the caller's mistake, not a server fault, and
+        # the message names what IS available rather than only what is not.
+        raise HTTPException(400, str(exc)) from exc
+
+    existing = collateral_item(_db, topic_id, kind)
+    built = (existing or {}).get("builds", {}).get(fmt)
+    if built and built.get("exists") and not built.get("stale") and not force:
+        return existing
+
+    needs = spec["needs"]
+    if "sizing" in needs and not sizes_for_topic(_db, topic_id):
+        MarketSizer(_cfg, _db).run(topic_ids=[topic_id])
+    if ("competition" in needs or "analysis" in needs) and competition_for_topic(_db, topic_id) is None:
+        CompetitionAnalyser(_cfg, _db).run(topic_ids=[topic_id])
+    if "description" in needs:
+        stored = description_for_topic(_db, topic_id)
+        if stored is None or stored["stale"] or force:
+            try:
+                DescriptionGenerator(_cfg, _db, _llm()).generate(dict(row))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Collateral %s for %s built without a fresh description: %s",
+                            kind, topic_id, exc)
+
+    try:
+        return PreSalesBuilder(_cfg, _db, _llm()).build(topic_id, kind, fmt)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"{spec['title']} generation failed: {exc}") from exc
+
+
+@app.get("/api/topics/{topic_id}/presales/{kind}/file")
+def presales_file(topic_id: str, kind: str, fmt: str | None = Query(None),
+                  download: bool = Query(False)) -> FileResponse:
+    """The file itself.
+
+    Inline by default so a PDF can be previewed in the tab; as an attachment
+    with ?download=1. PowerPoint, Word and Markdown have no inline viewer worth
+    the name, so the frontend always asks for the attachment form for those —
+    but the choice stays here rather than being hard-coded per format, because
+    a browser that CAN preview one should be allowed to.
+    """
+    try:
+        collateral_entry(kind)
+        fmt = collateral_format(kind, fmt)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    path = collateral_path(_db, topic_id, kind, fmt)
+    if path is None:
+        raise HTTPException(
+            404, f"No {kind} generated for {topic_id} as .{fmt}. POST to this path first.")
+    build = ((collateral_item(_db, topic_id, kind) or {}).get("builds", {})).get(fmt, {})
+    disposition = "attachment" if download else "inline"
+    return FileResponse(
+        path, media_type=build.get("media_type", "application/octet-stream"),
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{build.get("filename", path.name)}"',
+            # Regenerated in place, so a cached copy would serve a stale document
+            # from the same URL.
             "Cache-Control": "no-store",
         },
     )

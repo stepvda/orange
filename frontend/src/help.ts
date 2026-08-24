@@ -317,6 +317,21 @@ export const HELP: Record<string, HelpEntry> = {
     ],
   },
 
+  presales: {
+    title: 'Pre-sales collateral',
+    ref: 'FR-18',
+    body: [
+      'The brief is one document for one conversation. This is the twelve pieces the team needs between that conversation and a proposal: a discovery and qualification pack, an outreach sequence, a first-meeting deck, a value hypothesis, a reference pack, competitor battlecards, a solution outline, a PoC scoping sheet, a partner brief, commercial model options, tender response blocks and a bid risk register.',
+      'Every piece is built from **one snapshot** of this space, so nothing in the pack can quote a different figure for the same quantity. Each carries the versions that produced it — the weight set, the sizing version, the competitor register — on its last page, because six months later the only question anybody asks about a document found in a shared drive is which versions made it.',
+      'The **format is your choice, per piece**. Documents can be PDF, Word or OpenDocument; decks can be PowerPoint, OpenDocument or PDF. The default is the format the artefact wants to be — a battlecard is a PDF because it is read on a phone and must not have been edited since it was approved; tender blocks are Word because they are paste-fodder for a response. Formats coexist: asking for Word after you have the PDF gives you both.',
+      'In PowerPoint the diagrams are **native shapes**, not pictures — an architect can move a box rather than redraw the slide. In PDF they are exact vector geometry. Word and OpenDocument get the same diagram as a high-resolution image, because neither has a drawing model this system can target.',
+      'Pieces that need a written narrative make one model call, and **look at the public record first** — the corpus is refreshed on a cadence and the document is being written today, and a regulator\'s deadline or a competitor\'s announcement lives in that gap. Anything drawn from a retrieved item must name its publisher inline, and every item the writer saw is listed at the back so a citation can be followed. Those items have not been through the radar\'s evidence validation, and the document says so.',
+      'No figure in any of this is written by a model. Money comes from this space\'s own sizing; positions on the competitive map and bands on the risk matrix are ordinal judgements on a fixed scale, clamped on arrival and never printed as quantities.',
+      'A piece whose inputs are missing still builds, with a banner naming the gap. An outline that says "built without the written description" is more use than an error message: it still carries the component map and the portfolio path.',
+      'Staleness is tracked **per piece and per cause** — the space changed, the narrative was regenerated underneath it, or the sizing was recomputed. Those need different fixes, so the row says which happened rather than only that something did.',
+    ],
+  },
+
   coverage: {
     title: 'Coverage',
     ref: 'NFR-08',

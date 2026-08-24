@@ -21,6 +21,14 @@ named competitor is doing there and how Orange differentiates against each of
 them, and a **PDF brief** a salesperson can take into a meeting. Every claim is bound to a dated, attributable source, and every
 number decomposes into named components.
 
+Beyond the brief, each space carries **twelve pieces of pre-sales collateral**
+for the work between the first meeting and a proposal — qualification, a
+solution outline, battlecards, a business case, a PoC scope, tender blocks, a
+risk register and more — each with its own diagrams, and each available as PDF,
+Word or OpenDocument (decks as PowerPoint, OpenDocument or PDF). All twelve are
+built from one snapshot of the space, so nothing in the pack can disagree with
+anything else in it.
+
 Section references below (§4.5.3, SC-13, FR-30 …) point at the requirements
 document. They are also carried in the code as comments, so any given behaviour
 can be traced back to the requirement that asked for it.
@@ -49,6 +57,17 @@ PYTHONPATH=src python3 -m radar.cli serve            # → http://127.0.0.1:8000
 # 6. Serve the React frontend (separate terminal)
 npm --prefix frontend install
 npm --prefix frontend run dev                        # → http://localhost:5173
+```
+
+Signing in: the first start of an empty database creates one account,
+**`orange` / `orange`**, and the interface says so on every screen until the
+password is changed. Change it in the app (click the account name in the top
+bar) or from the command line:
+
+```bash
+PYTHONPATH=src python3 -m radar.cli user passwd orange   # prompts, twice
+PYTHONPATH=src python3 -m radar.cli user add jo          # a second account
+PYTHONPATH=src python3 -m radar.cli user list            # who exists, who is still on the default
 ```
 
 The pipeline can also be run stage by stage, which is how you iterate:
@@ -921,6 +940,22 @@ not just the number: TAM/SAM/SOM with their ranges, every factor with its source
 year and basis badge, the caveats behind a disclosure, and per competitor the
 signals that name them.
 
+**Signing in** is a screen of its own, rendered instead of the radar rather than
+over it: every panel behind it opens by fetching, and mounting them for a
+signed-out visitor means a dozen requests that all answer `401`, painting the
+error state of eight panels behind a login form. One refusal message covers both
+an unknown account and a wrong password — a sign-in form that distinguishes them
+is a staff directory with a slow interface.
+
+**Deleting a space** sits at the bottom of the detail pane, behind its own rule,
+because every other control there is reversible and that one is not. The dialog
+asks the server what would go and reads the answer out first: thirteen tables
+point at a space, and "are you sure?" over a number nobody was shown is not a
+confirmation. It also says what is *not* lost — the signals are shared evidence
+and stay — and that a later refresh meeting the same taxonomy triple will
+synthesise the space again, because identity is the triple (DR-03) and deleting
+is a statement about the corpus as it stands, not a permanent veto.
+
 Deep links work: `?topic=OS012&role=presales&theme=dark`, and `?tab=brief` opens
 the brief for the selected space.
 
@@ -1091,18 +1126,27 @@ allows Kudu to answer again.
 
 ### Before this goes anywhere real
 
-The deployed app is **public and unauthenticated**, which is fine for a
-demonstration and not fine for anything else. Two things follow:
+The app now requires a sign-in (`src/radar/auth.py`). Every `/api` path is behind
+a session; the built bundle and `/healthz` are not, because the login screen has
+to load before anyone can sign in and a liveness probe that answers `401` makes
+every deployment look unhealthy. The session is an `HttpOnly`, `SameSite=Lax`
+cookie whose value is stored only as a SHA-256, and passwords are PBKDF2-HMAC-SHA256
+verifiers at OWASP's current iteration count — so a copy of the database file is
+neither a set of passwords nor a set of live logins, which matters when the
+database *is* a file on a share.
 
-* The brief PDFs are stamped *Internal*, and the business graph, the competitor
-  register and the reference density are Orange's own material. Anyone with the
-  URL can read all of it.
+Two things that were true before it and are still worth acting on:
+
+* **The shipped account is `orange` / `orange`.** It exists so a fresh database
+  is usable without a shell, it is flagged `must_change_password`, and the
+  interface carries a banner until it is changed. Change it on first sign-in.
 * The generation endpoints (`POST /api/topics/{id}/description`, `POST
   /api/topics/{id}/brief`) call the configured model with the deployed key, so
-  anyone with the URL can spend it. The key in question was shared in plaintext
-  over chat during development and should be rotated regardless.
+  anyone who *can* sign in can spend it. The key in question was shared in
+  plaintext over chat during development and should be rotated regardless.
 
-Either of these closes it, in one command:
+Defence in depth is still worth having — a password is one factor, and the
+platform can add a second in one command:
 
 ```bash
 # Only your address may reach it
@@ -1119,7 +1163,7 @@ az webapp auth update -g rg-orange-radar -n web-orange-radar-1521f5 \
 ## Tests
 
 ```bash
-python3 -m pytest tests/ -q      # 294 tests
+python3 -m pytest tests/ -q      # 408 tests
 ```
 
 They cover the invariants that would be expensive to discover late: score

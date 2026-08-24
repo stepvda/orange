@@ -195,6 +195,76 @@ class LLMClient:
             # well-formed reply rather than a marker.
             payload = {"reply": "[mock question]", "understood": {}, "missing": ["vertical"],
                        "asking_for": "vertical", "suggestions": [], "ready": False, "briefs": []}
+        elif "MOCK_KIND=presales" in system:
+            # One superset payload rather than a branch per collateral kind:
+            # each writer in `presales.content` picks out the keys it needs and
+            # ignores the rest, so a single stub exercises every validator on
+            # the real path. Deliberately well-formed — the presales tests are
+            # about what the RENDERERS do with valid content (does the deck
+            # paginate, does the battlecard place its dots, does a missing
+            # section produce a note instead of a hole), and a marker payload
+            # would short-circuit all of it into the fallback branch.
+            payload = {
+                "buying_centre": [
+                    {"role": "Operations director", "stance": "economic buyer",
+                     "cares_about": "unplanned downtime on the line",
+                     "trigger": "a regulatory audit due this year"},
+                    {"role": "Plant IT manager", "stance": "technical evaluator",
+                     "cares_about": "integrating without touching the control network",
+                     "trigger": "an ageing gateway estate"},
+                ],
+                "qualification": [{"criterion": "Economic buyer",
+                                   "question": "Who signs for downtime reduction?",
+                                   "what_good_looks_like": "A named director with a budget line"}],
+                "disqualifiers": ["No budget cycle before next year"],
+                "components": [{"label": "Connectivity", "provider": "orange", "note": "private network"},
+                               {"label": "Edge analytics", "provider": "third_party",
+                                "note": "to be sourced"}],
+                "interfaces": [{"between": "Connectivity and Edge analytics",
+                                "carries": "telemetry from the plant floor"}],
+                "open_questions": ["Which control system is in place?"],
+                "field": "A crowded field of integrators with one telco incumbent.",
+                "cards": [{"competitor": "Example Competitor", "their_pitch": "One vendor, one throat to choke",
+                           "strong_where": "Existing estate on the customer site",
+                           "thin_where": "No sovereign hosting option",
+                           "trap_question": "Where does the data physically reside?",
+                           "our_proof": "No named proof point yet — this is a gap.",
+                           "reach": "high", "depth": "medium",
+                           "dimensions": [{"dimension": "Sovereignty", "verdict": "Orange ahead"}]}],
+                "drivers": [{"driver": "Unplanned downtime",
+                             "mechanism": "Failures are caught before the line stops"}],
+                "cost_of_inaction": "The estate keeps ageing and each outage is absorbed as cost.",
+                "proof_plan": ["Replay last year's outage log against the model"],
+                "slides": [{"title": "What has changed", "bullets": ["Regulation now bites"],
+                            "notes": "Open on the change, not on Orange."}],
+                "phases": [{"label": "Instrument", "weeks": 2, "deliverable": "Telemetry flowing"},
+                           {"label": "Prove", "weeks": 3, "deliverable": "Detection report"}],
+                "in_scope": ["One production line"],
+                "out_scope": ["Rollout to other sites"],
+                "success_criteria": [{"criterion": "Detection ahead of failure",
+                                      "measured_by": "Alerts raised before the recorded stoppage"}],
+                "customer_provides": ["Access to the historian"],
+                "blocks": [{"section": "Our understanding of the requirement",
+                            "answer": "We understand that [customer name] needs to reduce "
+                                      "unplanned stoppages on its production lines without "
+                                      "changing the control network. Our approach separates the "
+                                      "telemetry path from the control path entirely."}],
+                "emails": [{"stage": "first touch", "subject": "downtime on the [company] lines",
+                            "body": "Hello [first name], we have been looking at how plants in "
+                                    "your sector are catching failures earlier without touching "
+                                    "the control network. Worth a short conversation?"}],
+                "options": [{"model": "Subscription", "how_it_works": "A per-site monthly fee",
+                             "orange_risk": "low", "customer_appeal": "medium",
+                             "levers": ["term", "volume commitment"],
+                             "use_when": "The customer wants predictable operating cost"}],
+                "risks": [{"risk": "The control network owner blocks access", "likelihood": "medium",
+                           "impact": "high", "mitigation": "Prove the telemetry path is read-only",
+                           "owner_role": "Solution architect"}],
+                "gaps": [{"capability": "Edge analytics", "why_needed": "Detection runs on site",
+                          "candidate_type": "systems integrator with OT experience"}],
+                "the_ask": "Confirm a partner for edge analytics before the customer workshop.",
+                "what_orange_brings": ["The connectivity and the sovereign hosting"],
+            }
         else:
             payload = {"mock": True, "digest": digest[:16]}
         return LLMResponse(text=json.dumps(payload), model="mock")

@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from .brief import resolve_brief
+from .presales import resolve as resolve_collateral
 from .db import Database
 
 log = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ DEPENDENTS: tuple[tuple[str, str, str], ...] = (
     ("topic_competition", "opportunity_id", "competitive assessments"),
     ("topic_competitor_analysis", "opportunity_id", "competitor comparisons"),
     ("topic_briefs", "opportunity_id", "sales briefs"),
+    ("topic_collateral", "opportunity_id", "pre-sales collateral"),
     ("plan_selections", "opportunity_id", "places in a portfolio plan"),
 )
 
@@ -76,26 +78,27 @@ DEPENDENTS: tuple[tuple[str, str, str], ...] = (
 def _owned_file(db: Database, recorded: str, resolver, env_var: str) -> Path | None:
     """The file this row names, resolved safely enough to *unlink*.
 
-    `brief.resolve_brief` falls back from the recorded path to "same filename, in
-    the directory this PROCESS keeps briefs in". That is right for reading: a
-    brief is built by the batch job on one machine and served from another, and
-    without the fallback every download 404s on Azure.
+    `brief.resolve_brief` and `presales.resolve` both fall back from the recorded
+    path to "same filename, in the directory this PROCESS keeps briefs in". That
+    is right for reading: collateral is written by whichever machine pressed the
+    button and served by another, and without the fallback every download 404s on
+    Azure.
 
     It is wrong for deleting. The fallback is keyed on a bare filename and a
     process-global directory, so a delete driven by one database can unlink a
-    file that database never recorded. That is not hypothetical — it is why this
-    function exists. A test that built `OS001` in a temporary database, using the
-    filename the real corpus also uses, deleted the real
-    `data/briefs/OS001-opportunity-brief.pdf`; it then passed on every later run,
-    because by then there was nothing left to delete. The same fallback removed a
-    second brief when a delete was exercised against a copy of the database made
-    for the purpose — a copy whose rows named the original's files.
+    file that database never recorded. That is not hypothetical — it is how this
+    function came to exist. A test that built `OS001` in a temporary database,
+    using the filename the real corpus also uses, deleted the real
+    `data/briefs/OS001-opportunity-brief.pdf`; and then passed on every later
+    run, because by then there was nothing left to delete. The same fallback
+    removed a second brief when a delete was exercised against a copy of the
+    database made for the purpose.
 
     So a delete only unlinks a file it can show the database owns: one inside the
-    directory tree the database itself lives in, or inside a directory an
-    operator has named explicitly. Anything else is left on disk and logged. An
-    orphaned PDF is a housekeeping problem; deleting the wrong file is not
-    recoverable.
+    directory tree the database itself lives in, or inside a brief/collateral
+    directory an operator has named explicitly. Anything else is left on disk and
+    logged. An orphaned PDF is a housekeeping problem; deleting the wrong file is
+    not recoverable.
     """
     candidate = resolver(recorded)
     if candidate is None:
@@ -203,6 +206,12 @@ def deletion_impact(db: Database, topic_id: str) -> dict[str, Any]:
             f"SELECT filename FROM topic_briefs WHERE opportunity_id IN ({placeholders})", tuple(ids)
         )
     ] if _table_exists(db, "topic_briefs") else []
+    collateral = [
+        f'{row["kind"]} ({row["filename"]})' for row in db.query(
+            f"SELECT kind, filename FROM topic_collateral WHERE opportunity_id IN ({placeholders}) "
+            "ORDER BY kind", tuple(ids)
+        )
+    ] if _table_exists(db, "topic_collateral") else []
 
     return {
         "topic_id": topic_id,
@@ -214,6 +223,7 @@ def deletion_impact(db: Database, topic_id: str) -> dict[str, Any]:
         "merged_duplicates": ids[1:],
         "plans": plans,
         "briefs": briefs,
+        "collateral": collateral,
         # Named so the dialog can say what is NOT lost. Evidence is shared and
         # replayable; a reader who thinks 47 sources are about to be destroyed
         # will not press the button, and would be wrong not to.
@@ -222,7 +232,7 @@ def deletion_impact(db: Database, topic_id: str) -> dict[str, Any]:
 
 
 def delete_topic(db: Database, topic_id: str) -> dict[str, Any]:
-    """Remove a space, its dependent rows and its brief files.
+    """Remove a space, its dependent rows and its generated files.
 
     Returns the same shape `deletion_impact` produces, with the removal
     confirmed — the caller reports what went rather than what would have. The
@@ -237,19 +247,30 @@ def delete_topic(db: Database, topic_id: str) -> dict[str, Any]:
     # because a brief written on the machine that ran the pipeline is routinely
     # absent from the machine serving the app (see `brief.resolve_brief`). A
     # missing PDF must not abort a delete the user has already confirmed.
-    files_removed = 0
-    if _table_exists(db, "topic_briefs"):
+    # Counted separately, not summed into one number. `brief_files_removed` is
+    # in the report the confirm dialog reads, and a count that quietly grew to
+    # include twelve pieces of collateral would report "13 briefs removed" for a
+    # space that had one.
+    def remove_files(table: str, resolver, label: str, env_var: str) -> int:
+        if not _table_exists(db, table):
+            return 0
+        removed = 0
         for row in db.query(
-            f"SELECT path FROM topic_briefs WHERE opportunity_id IN ({placeholders})", tuple(ids)
+            f"SELECT path FROM {table} WHERE opportunity_id IN ({placeholders})", tuple(ids)
         ):
-            path = _owned_file(db, row["path"], resolve_brief, "RADAR_BRIEF_DIR")
+            path = _owned_file(db, row["path"], resolver, env_var)
             if path is None:
                 continue
             try:
                 path.unlink()
-                files_removed += 1
+                removed += 1
             except OSError as exc:  # noqa: PERF203 — one message per file is the point
-                log.warning("Could not remove brief %s: %s", path, exc)
+                log.warning("Could not remove %s %s: %s", label, path, exc)
+        return removed
+
+    files_removed = remove_files("topic_briefs", resolve_brief, "brief", "RADAR_BRIEF_DIR")
+    collateral_removed = remove_files("topic_collateral", resolve_collateral, "collateral",
+                                      "RADAR_COLLATERAL_DIR")
 
     with db.cursor() as cur:
         # The tombstones first: their `merged_into` points at the row about to
@@ -270,8 +291,9 @@ def delete_topic(db: Database, topic_id: str) -> dict[str, Any]:
 
     log.warning(
         "Deleted opportunity space %s (%s) — %d dependent row group(s), %d brief file(s), "
-        "%d plan(s) affected",
+        "%d collateral file(s), %d plan(s) affected",
         topic_id, impact["statement"][:80], len(impact["removes"]), files_removed,
-        len({plan["id"] for plan in impact["plans"]}),
+        collateral_removed, len({plan["id"] for plan in impact["plans"]}),
     )
-    return {**impact, "deleted": True, "brief_files_removed": files_removed}
+    return {**impact, "deleted": True, "brief_files_removed": files_removed,
+            "collateral_files_removed": collateral_removed}

@@ -462,6 +462,48 @@ CREATE TABLE IF NOT EXISTS topic_briefs (
 );
 
 -- ---------------------------------------------------------------------------
+-- Pre-sales collateral (FR-18, extending the brief).
+--
+-- One row per (space, kind) rather than one per space: the twelve pieces in
+-- `radar.presales.catalogue` age independently, and a pack whose battlecard
+-- predates the current competitor register while its value case is an hour old
+-- is exactly the state the interface has to be able to show. Files on disk for
+-- the same reason briefs are (DR-08) — a PPTX in a row is a blob nobody can
+-- serve efficiently, and these are produced on one machine and served from
+-- another.
+--
+-- `has_narrative` records whether a model wrote any of it. A piece rendered
+-- from computed and curated data alone is not a degraded version of itself, it
+-- is a different document, and the reader is told which one they have.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS topic_collateral (
+    opportunity_id  TEXT NOT NULL REFERENCES opportunity_spaces(id) ON DELETE CASCADE,
+    kind            TEXT NOT NULL,             -- catalogue slug, e.g. 'battlecards'
+    -- The output format is part of the key, not an attribute. Somebody who has
+    -- the battlecard as a PDF and then asks for Word wants both; overwriting
+    -- the first would be a surprising way to answer the second.
+    fmt             TEXT NOT NULL,             -- pdf | docx | odt | pptx | odp | md
+    generated_at    TEXT NOT NULL,
+    topic_version   INTEGER NOT NULL,          -- staleness, as for descriptions and briefs
+    path            TEXT NOT NULL,
+    filename        TEXT NOT NULL,
+    bytes           INTEGER NOT NULL,
+    content_hash    TEXT NOT NULL,
+    media_type      TEXT NOT NULL,
+    description_at  TEXT,                      -- which description generation it rendered
+    market_size_at  TEXT,                      -- which sizing run it rendered
+    weight_set      TEXT NOT NULL,
+    sizing_version  TEXT,
+    prompt_version  TEXT,
+    model_version   TEXT,
+    pipeline_version TEXT NOT NULL,
+    collateral_schema TEXT NOT NULL,
+    has_narrative   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (opportunity_id, kind, fmt)
+);
+CREATE INDEX IF NOT EXISTS idx_collateral_topic ON topic_collateral(opportunity_id);
+
+-- ---------------------------------------------------------------------------
 -- Internal signal injection (FR-24). Collaboration model B (§4.10): captures
 -- the most valuable signal in the company, which currently lives only in
 -- people's heads. Weighted carefully so one loud account cannot distort the
@@ -748,6 +790,8 @@ class Database:
             if column not in cols:
                 log.info("Migration: adding %s.%s", table, column)
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        _repair_collateral_key(conn)
+
 
     # -- helpers -----------------------------------------------------------
 
@@ -761,6 +805,48 @@ class Database:
     def query_one(self, sql: str, params: tuple | dict = ()) -> sqlite3.Row | None:
         rows = self.query(sql, params)
         return rows[0] if rows else None
+
+
+def _repair_collateral_key(conn: sqlite3.Connection) -> None:
+    """Rebuild `topic_collateral` when it predates the output-format column.
+
+    Not expressible as a MIGRATIONS entry, and that is the whole point of it
+    living here. `fmt` is part of the PRIMARY KEY — one row per (space, kind,
+    format), because somebody who has the battlecard as a PDF and then asks for
+    Word wants both — and SQLite's ALTER TABLE cannot add a column to a primary
+    key. The table has to be rebuilt.
+
+    Dropping rows is normally not something a schema step should do quietly, so
+    two things make it safe here specifically. The table holds only POINTERS to
+    derived files: every row is reproducible by pressing Generate, and none of
+    it is anybody's input. And the rows are unreadable as they stand — the code
+    that queries them selects `fmt`, so leaving them in place means every
+    request 500s rather than merely losing a cache.
+
+    The generated FILES are deliberately left on disk. They are harmless, and
+    unlinking files on the strength of a schema mismatch is a much bigger claim
+    than dropping a cache table.
+    """
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='topic_collateral'"
+    ).fetchone():
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(topic_collateral)")}
+    if "fmt" in columns:
+        return
+    orphaned = conn.execute("SELECT COUNT(*) FROM topic_collateral").fetchone()[0]
+    log.warning(
+        "Migration: rebuilding topic_collateral for the output-format key — "
+        "%d row(s) dropped. The generated files are left on disk; press Generate "
+        "to re-record them.", orphaned)
+    conn.execute("DROP TABLE topic_collateral")
+    # Recreated from SCHEMA by the executescript that runs before this, on the
+    # next call. Running that one statement here keeps init_schema single-pass.
+    start = SCHEMA.index("CREATE TABLE IF NOT EXISTS topic_collateral")
+    end = SCHEMA.index(";", SCHEMA.index("PRIMARY KEY (opportunity_id, kind, fmt)", start)) + 1
+    conn.execute(SCHEMA[start:end])
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_collateral_topic "
+                 "ON topic_collateral(opportunity_id)")
 
 
 def js(value: Any) -> str:

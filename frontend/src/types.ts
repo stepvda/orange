@@ -320,6 +320,73 @@ export interface BriefMeta {
   missing_sections?: string[]
 }
 
+/** One output format a piece of collateral can be produced in. */
+export interface CollateralFormat {
+  fmt: string
+  label: string
+  built: boolean
+  stale: boolean
+  bytes: number | null
+  url: string
+}
+
+/** What has actually been built for one (space, kind, format). */
+export interface CollateralBuild {
+  fmt: string
+  format_label: string
+  exists: boolean
+  generated_at?: string
+  topic_version?: number
+  filename?: string
+  bytes?: number
+  content_hash?: string
+  media_type?: string
+  stale?: boolean
+  /** Which kind of staleness — the space, the narrative, the sizing or the file. */
+  stale_reason?: string | null
+  incomplete?: boolean
+  /** Whether a model wrote any of it, or it is computed and curated data only. */
+  has_narrative?: boolean
+  weight_set?: string
+  sizing_version?: string
+  prompt_version?: string
+  model_version?: string
+  url: string
+}
+
+/** One row of the pre-sales catalogue, with whatever exists for it.
+ *
+ * The catalogue is always returned in full, never only what has been built:
+ * the tab's job is to say what COULD be produced as much as what has been.
+ */
+export interface CollateralItem {
+  kind: string
+  title: string
+  audience: string
+  summary: string
+  charts: string[]
+  model_calls: number
+  /** The default format — the one the artefact wants to be. */
+  format: string
+  formats: CollateralFormat[]
+  builds: Record<string, CollateralBuild>
+  exists: boolean
+  stale: boolean
+  stale_reason: string | null
+  incomplete: boolean
+  has_narrative: boolean
+  generated_at: string | null
+  bytes: number | null
+  content_hash: string | null
+  filename: string | null
+  url: string
+}
+
+export interface PreSalesIndex {
+  topic_id: string
+  items: CollateralItem[]
+}
+
 export interface Topic {
   id: string
   version: number
@@ -798,4 +865,61 @@ export interface PlanReportStatus {
   generated: boolean
   report: PlanReport | null
   narrative_available: boolean
+}
+
+/* --- accounts and sessions (radar/auth.py) -------------------------------- */
+
+/** No hash, no token: `radar.auth.public_user` decides what leaves the server,
+ *  and this mirrors that shape rather than the row behind it. */
+export interface User {
+  username: string
+  display_name: string
+  /** True while the account still holds the credential the radar shipped with.
+   *  The interface says so on every screen until it is false. */
+  must_change_password: boolean
+  last_login_at: string | null
+  password_changed_at: string | null
+}
+
+export interface SessionInfo {
+  authenticated: boolean
+  user: User | null
+  /** Shown beside the field that enforces it, rather than discovered from a
+   *  rejection after the user has typed something twice. */
+  password_policy: { min_length: number }
+}
+
+/* --- deleting an opportunity space (radar/deletion.py) -------------------- */
+
+/** One group of rows a delete would take, already worded for a reader:
+ *  "3 asset links", not "opportunity_links: 3". */
+export interface DeletionRemoval {
+  table: string
+  label: string
+  count: number
+}
+
+export interface DeletionImpact {
+  topic_id: string
+  statement: string
+  triple: { vertical: string; use_case: string; technology: string }
+  state: string
+  removes: DeletionRemoval[]
+  /** Spaces folded into this one under the identity rule. They are the same
+   *  space, so they leave with it. */
+  merged_duplicates: string[]
+  /** Portfolio plans that selected this space. Their stored projection still
+   *  counts it, so deleting the space stops the plan adding up — reported
+   *  rather than blocked. */
+  plans: { id: string; label: string | null; created_at: string; entry_year: number }[]
+  briefs: string[]
+  /** Evidence is shared and stays; only the attachment goes. Named so the
+   *  dialog can say what is NOT lost. */
+  signals_kept: number
+}
+
+export interface DeletionReport extends DeletionImpact {
+  deleted: true
+  brief_files_removed: number
+  deleted_by: string | null
 }

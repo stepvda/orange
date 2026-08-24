@@ -13,6 +13,13 @@ openai>=1.40
 # Embeddings — local by default, keeps the sovereign deployment option open (NFR-05)
 sentence-transformers>=2.7
 
+# Collateral. reportlab renders the PDFs; these two render the editable
+# formats pre-sales actually works in. Both are pure Python -- no LibreOffice,
+# no headless browser -- so the sovereign deployment option stays open (NFR-05).
+reportlab>=4.0
+python-pptx>=0.6.23
+python-docx>=1.1
+
 # UI
 streamlit>=1.33
 plotly>=5.20
