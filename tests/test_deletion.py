@@ -273,6 +273,41 @@ def test_a_delete_never_reaches_outside_the_database_it_was_given(db, tmp_path, 
     assert not innocent.exists()
 
 
+def test_a_brief_beside_the_database_is_still_removed_when_its_path_is_stale(db, tmp_path,
+                                                                              monkeypatch):
+    """The third quadrant of the rule, and the layout everything real runs in.
+
+    Local development keeps `data/radar.db` next to `data/briefs`; the Azure
+    deployment keeps `/home/data/radar.db` next to `/home/data/briefs`. In both,
+    a brief built by the batch job on another machine has a recorded path that
+    does not resolve, so the delete depends on exactly the fallback the guard
+    polices.
+
+    The other two tests prove the guard REFUSES things. This one proves it is not
+    so tight that an ordinary delete silently leaves the PDF behind — an orphan
+    is a milder failure than deleting the wrong file, which is why the guard errs
+    that way, but it is still a failure and nothing else would catch it.
+    """
+    monkeypatch.delenv("RADAR_BRIEF_DIR", raising=False)
+    beside = tmp_path / "briefs"          # tmp_path is the database's own directory
+    beside.mkdir()
+    pdf = beside / "OS001-opportunity-brief.pdf"
+    pdf.write_bytes(b"%PDF-1.4 shipped alongside the database")
+    monkeypatch.setattr("radar.brief.brief_dir", lambda: beside)
+
+    make_space(db, "OS001")
+    with db.cursor() as cur:
+        cur.execute(
+            """INSERT INTO topic_briefs (opportunity_id, generated_at, topic_version, path, filename,
+                                         bytes, content_hash, weight_set, pipeline_version)
+               VALUES ('OS001', ?, 1, '/built/on/a/laptop/OS001-opportunity-brief.pdf',
+                       'OS001-opportunity-brief.pdf', 10, 'hash', 'ws-1', '0.1.0')""", (NOW,))
+
+    report = delete_topic(db, "OS001")
+    assert report["brief_files_removed"] == 1
+    assert not pdf.exists()
+
+
 def test_without_an_explicit_brief_directory_a_stray_filename_is_left_alone(db, tmp_path_factory,
                                                                             monkeypatch):
     """The same collision with nothing configured — which is the state every test
