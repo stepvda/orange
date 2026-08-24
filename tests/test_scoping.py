@@ -285,6 +285,25 @@ def test_a_brief_the_corpus_does_answer_is_runnable_and_ready(cfg, db):
     assert out["ready"] is True
 
 
+def test_a_hedging_model_cannot_disable_a_brief_the_corpus_supports(cfg, db):
+    """The other direction, and the one that shipped broken.
+
+    The assistant is told to put a brief forward even while hedging about the
+    evidence — otherwise a genuinely new idea has nothing to press Generate on.
+    It then writes "the evidence is thin, marking this as not ready", which is a
+    fair remark about the corpus and a terrible reason to disable a button whose
+    brief has already passed the same corroboration check the run applies. The
+    symptom was a ticked, runnable brief sitting under a greyed-out button with
+    nothing on screen explaining why.
+    """
+    _seed(db)
+    service, _ = _service(cfg, db, _reply(ready=False, briefs=[_brief()]))
+    out = service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}])
+    assert out["briefs"][0]["runnable"] is True
+    assert out["model_ready"] is False, "the model hedged"
+    assert out["ready"] is True, "and the corpus overruled it"
+
+
 def test_ready_is_refused_when_the_model_proposes_no_brief_at_all(cfg, db):
     """Nothing to run means nothing to enable, whatever the flag says."""
     _seed(db)

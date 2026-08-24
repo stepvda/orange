@@ -219,12 +219,27 @@ class ScopingService:
 
         understood, unknown = self._resolve(raw.get("understood") or {})
         briefs = self._check_briefs(synth, raw.get("briefs") or [])
-        # The model's own flag is a proposal. A brief that retrieves nothing
-        # cannot produce a space, so the button it would enable is a lie — and
-        # `ready` with no runnable brief is the commonest way this conversation
-        # could waste somebody's afternoon.
+        # THE CORPUS DECIDES, IN BOTH DIRECTIONS. The model's flag is a
+        # proposal and nothing more.
+        #
+        # Overruling it downward is the obvious half: a brief that retrieves
+        # nothing cannot produce a space, so the button it would enable is a lie.
+        #
+        # Overruling it UPWARD matters just as much, and is easier to miss.
+        # The assistant is told to put a brief forward even when it is hedging
+        # about the evidence — otherwise a genuinely new idea has nothing to
+        # press Generate on. It then writes "the evidence is thin, marking this
+        # as not ready", which is a fair remark about the corpus and a terrible
+        # reason to disable a button whose brief has already passed the same
+        # corroboration check the run will apply. Gating on the model's mood
+        # left a ticked, runnable brief sitting under a greyed-out button with
+        # no way to find out why.
+        #
+        # So `ready` is simply whether anything here can be run. The model's
+        # opinion travels beside it as `model_ready`, for the screen to show
+        # where the two disagree.
         runnable = [b for b in briefs if b["runnable"]]
-        ready = bool(runnable) and bool(raw.get("ready"))
+        ready = bool(runnable)
 
         return {
             "reply": str(raw.get("reply") or "").strip(),

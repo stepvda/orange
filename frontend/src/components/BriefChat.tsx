@@ -636,6 +636,19 @@ export default function BriefChat({
               beside this conversation actually covers is what will change the answer.
             </p>
           )}
+          {/* The other direction, and the one that used to leave a ticked brief
+              under a dead button. The assistant hedges about the corpus and says
+              "not ready"; the brief it wrote has already cleared the same check
+              the run applies. Its opinion is worth showing and not worth
+              obeying. */}
+          {turn && !turn.model_ready && turn.ready && (
+            <p className="gen-quiet">
+              The assistant is hedging about the evidence, and it is right to — but the brief below
+              already clears the check the run itself applies, so it can be generated. Its caution
+              is about how <i>much</i> the corpus carries here, not about whether the run will find
+              anything.
+            </p>
+          )}
           <div className="chat-brief-list">
             {briefs.map((brief, index) => (
               <BriefCard
