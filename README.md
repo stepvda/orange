@@ -103,6 +103,8 @@ Useful commands:
 | `radar competitor-analysis` | Per-topic competitor analysis and the differentiation angle |
 | `radar plan --narrate --pdf` | Build a five-year portfolio plan, write the business plan, export it as one PDF |
 | `radar plans` | List stored plans with their headline figures |
+| `radar plan --source workflow --from-stage demand_tested` | Plan the set the stage gate has already committed to, rather than choosing one |
+| `radar delete-space OS123` | Remove a space — prints the impact first, and says what it does *not* take |
 | `radar internal add \| moderate \| promote` | Internal signal intake — conversations, RFP themes, lost deals |
 
 ---
@@ -129,6 +131,15 @@ stages can be developed, tested and replaced independently.
  7  describe     pipeline/describe.py       topics + links      → narrative + diagram spec
 
     serve        readmodel.py, api.py, brief.py                 → radar, briefs, PDF, API
+
+Two subsystems sit beside the pipeline rather than in it. Both read what the
+pipeline produced; neither writes to it.
+
+ p1 plan         planner.py, plan_report.py   read model + economics.yaml
+                                              → a selected SET, an entry schedule,
+                                                a five-year projection and a PDF
+ p2 collateral   presales/                    one snapshot of a space
+                                              → twelve artefacts in five formats
 
 Competitor intelligence runs on its own cadence, outside `refresh`:
 
@@ -158,6 +169,17 @@ src/radar/
   scoping.py      the Generate screen's assistant — a corpus-grounded interview
                   that composes search briefs and refuses the ones the evidence
                   cannot answer
+  planner.py      portfolio selection under constraints (a mixed-integer
+                  program), the committed-set scheduler, the five-year
+                  projection, the flags and the narrative
+  plan_report.py  the plan as a six-part PDF — inputs, projection, spaces,
+                  business plan, assumptions
+  presales/       twelve pre-sales artefacts described once and emitted in five
+                  formats: catalogue, context, builder, research, content,
+                  blocks, documents, decks, emitters, charts, office
+  auth.py         sign-in, sessions, PBKDF2 verifiers, the application-level
+                  guard, and account management
+  deletion.py     what a delete takes with it, reported before it is taken
   internal.py     internal signal intake with a moderation gate (tier 3)
   bootstrap.py    serving-instance storage prep that never raises at import
   scoring.py      5 attractiveness components, right-to-win, horizon, lifecycle
@@ -193,11 +215,15 @@ propagate silently into every downstream number.
 | `config/sizing.yaml` | Sizing scope, datasets, contract-value rules, uncertainty bands, share assumptions |
 | `config/business_graph/competitors.yaml` | 65 named competitors with type, aliases, partner relationship, website and scrape status |
 | `config/role_modes.yaml` | Per-role ranking functions and link-type filters |
+| `config/economics.yaml` | Everything the Planner turns a market size into money with: margin by portfolio distance, ramp by horizon, capacity and effort, overlap discounts, and four figures quoted from Orange's own filed accounts |
 
 **Changing any weight requires a new `weight_set` id.** Scores across a version
 boundary are not comparable, every score records the set that produced it
 (SC-10), and the UI refuses to plot a trajectory across the boundary silently
-(§4.6 calibration-drift guard).
+(§4.6 calibration-drift guard). The same rule extends to `sizing_version` on
+every market size, `register_version` on every competitive assessment, and
+`economics_version` on every plan — a plan's id carries the version, so two plans
+built under different bands can never be confused for one another.
 
 ---
 
@@ -812,20 +838,25 @@ Read live from the working database, not typed here.
 |---|---|
 | Opportunity spaces | **418** — 334 active, 38 watchlist, 29 fading, 17 candidate |
 | Grid coverage | 15 of 15 verticals · 47 of 59 use cases · 33 of 38 technologies |
-| Signals | **11,354** from 33 sources · 7,267 tier-1 · 1,054 French-language |
+| Signals | **11,354** from 33 enabled sources, plus one from internal intake · 7,267 tier-1 · 1,054 French-language |
 | Evidence attachment | 11,181 signal-to-topic attachments across 325 theme clusters |
 | Business graph | 4,832 typed links onto 181 nodes and 182 edges |
-| Qualification | 313 market sizes · 181 competitive assessments |
+| Qualification | 701 market-size computations over 418 spaces · 314 with a bottom-up estimate · 181 competitive assessments |
 | Competitor intelligence | 1,745 pages from 53 of 65 competitors · 53 profiles · 177 per-topic analyses |
-| Outputs | 174 long-form descriptions · 174 PDF briefs |
+| Outputs | 174 long-form descriptions · 174 PDF briefs · 15 pre-sales artefacts built across 5 formats |
 | Reference data | 56,385 Eurostat observations across five series |
-| Tests | **294 passing** |
+| Planning | 7 stored plans — the baseline parameter plan selects 51 spaces from 231 admissible; the workflow plan takes both committed spaces and drops neither |
+| Workflow | 418 on the board — 416 Shortlisted, 2 Demand-tested |
+| Tests | **475 passing** |
 
-Two numbers worth reading as gaps rather than achievements: **all 4,832 links are
-machine-proposed and unconfirmed** — LK-06 wants a named human on the first
-occurrence of each pattern — and **237 of 418 spaces have no competitive
-assessment yet**, so their competitor tab is empty. Both are surfaced in the
-interface rather than left to be discovered.
+Four numbers worth reading as gaps rather than achievements: **all 4,832 links
+are machine-proposed and unconfirmed** — LK-06 wants a named human on the first
+occurrence of each pattern; **237 of 418 spaces have no competitive assessment
+yet**, so their competitor tab is empty; **104 spaces have no bottom-up market
+size**, which is what makes them invisible to the Planner rather than merely
+unqualified; and **the stage gate has two cards past Shortlisted**, so a
+workflow-sourced plan currently describes a portfolio of two. All four are
+surfaced in the interface rather than left to be discovered.
 
 ## Data sources
 
@@ -946,6 +977,33 @@ validated for lightness monotonicity, adjacent step separation, single hue and
 light-end contrast against its own surface in **both** light and dark mode.
 Evidence-gap marks carry a `!` glyph as well as a border, so the warning never
 depends on colour alone.
+
+**The full-screen view of a space** is the same content with the panes out of the
+way, in four tabs — the space, the competitors, the brief, the pre-sales pack.
+That is the order the questions arrive: what is this, who else is here, what do
+I send, and what comes after the meeting. The three-pane layout is right for
+working *through* the radar — filter, scan, open, compare, move on — and wrong
+for the moment somebody actually reads a space, because §4.9 gives the detail
+pane ten sections and reading them in a 420px column beside a chart nobody is
+looking at any more is the narrowest possible view of the longest content in the
+interface. The pre-sales tab is last on purpose: putting it before the brief
+would suggest a team should build a tender response before they have had the
+first meeting. It lists all twelve pieces whether or not anything has been
+built, because what *could* be produced is as much of the answer as what has
+been, and a screen that starts empty is one nobody presses a button on.
+
+**The Generate screen opens with a conversation, not a text box.** The box asked
+for one thing and gave one piece of feedback — a character count, which is the
+only failure that did not matter. An opportunity space is a vertical × use case
+× technology plus a buyer's problem and a place, and somebody who knows their
+market but not this taxonomy under-specified two of those every time; they found
+out minutes later, from a run that created nothing. The assistant interviews
+instead, with the corpus in front of it, and shows what each turn retrieved —
+publisher, date and cosine — beside the conversation. The Generate button is
+enabled by the corpus rather than by the assistant's opinion of itself, and
+where the two disagree the screen says so in either direction. The parameters
+route is still there for somebody who does know the taxonomy, and it shows the
+spaces that *already* match before spending a run on rediscovering them.
 
 **The brief view** is the middle pane rendering the PDF inline, with Download,
 Regenerate and a staleness warning when the topic has moved past the version the
@@ -1180,7 +1238,7 @@ az webapp auth update -g rg-orange-radar -n web-orange-radar-1521f5 \
 ## Tests
 
 ```bash
-python3 -m pytest tests/ -q      # 408 tests
+python3 -m pytest tests/ -q      # 475 tests
 ```
 
 They cover the invariants that would be expensive to discover late: score
@@ -1210,6 +1268,27 @@ uncited factual section is stripped; that a generated percentage or euro figure
 kills the section carrying it; that an unsupplied organisation does the same; and
 that a diagram box cannot claim an Orange asset the graph does not hold.
 
+The planner, collateral, scoping, auth and deletion suites (137 tests) hold the
+newest lines: that identical inputs give an identical plan id, so a plan cannot
+be silently recomputed under changed assumptions; that a capability pool is never
+over-committed under the optimiser and *is* reported when a committed set
+over-commits it; that `selected_count == considered_count` under the workflow
+source, because nothing there may be dropped; that a committed space with no
+market size is declared rather than quietly missing; that **every text frame on
+every generated slide fits its box**; that a collateral piece with a missing
+input still builds and says so; that a second format coexists with the first
+rather than replacing it; that `ready` on a proposed brief is the corpus's
+verdict rather than the model's; that a brief corroborated only on its vertical
+is refused; that signals survive a delete while their attachments do not; and
+that a plan which selected a deleted space is named rather than blocking the
+delete.
+
+The auth suite is worth one more sentence, because of *how* it tests. It **walks
+the router** rather than naming endpoints, so a route added without the guard
+fails a test that already exists. The failure mode of a per-route guard is the
+route somebody forgot, and a test that names endpoints has exactly the same
+failure mode.
+
 Several of these tests caught real bugs during the build:
 
 * Shannon entropy is scale-invariant, so a uniform tier-4 discount cancelled out
@@ -1224,6 +1303,16 @@ Several of these tests caught real bugs during the build:
 * The exploration slot (§4.7.6) drew from all filtered topics rather than
   role-eligible ones, so it could show a salesperson a topic with no proof point
   — bypassing the very filter §4.5.3 requires.
+* A slide test that checked only the bullet column passed while four chart labels
+  on the same slide overflowed off the edge. It now walks *every* text frame on
+  every slide, which is what should have been asserted the first time.
+* The scoping gate corroborated a brief against its taxonomy **labels**, and the
+  labels are approximations — closed lists of 15 verticals, 59 use cases and 32
+  technologies mean a proposal is filed under the nearest available cell. Tenders
+  for private-5G video surveillance duly "corroborated" a brief about
+  advertising-funded municipal screens, the button enabled, and the critic threw
+  out every candidate the run produced. The gate now judges the brief's own
+  sentence.
 
 ---
 
@@ -1236,11 +1325,19 @@ Matching the MVP exclusions in Table 15, plus what this pass did not reach:
 | CRM integration | Deferred by the briefing; public assets give a sufficient right-to-win proxy |
 | Learned scoring models | No labels exist on day one. The MVP ships the transparent baseline and the capture/replay harness the learned models need (§4.7) |
 | Patent connector | Needs EPO OPS registration or BigQuery credentials. Technology ownership currently uses a portfolio-level prior from `technologies.yaml` |
-| Slide export | The PDF brief (FR-18) is built; a PowerPoint variant is not |
-| Collaboration workflow (FR-25) | Priority C; depends on the collaboration model being agreed (§4.10) |
 | Headless-browser rendering | Three competitor sites render client-side only. Adding a browser to a pipeline that deliberately has none, for three profiles of sixty-five, is not the trade |
 | Learned per-role ranking | Needs 300–600 expert comparisons; the capture widget ships first |
 | Backtest evaluation harness | The replay path exists (FR-35); the metrics of §4.7.5 are not implemented |
+| Per-role authorisation | Sign-in answers *who*; it does not yet answer *may they*. Every signed-in account can currently move a stage, delete a space and spend model budget |
+| Rate limiting on generation | Sign-in bounds who can reach the endpoints that spend model budget, not how often they may |
+| ROI on a plan | There is no cost data at the granularity a space would need — not in the filings, not anywhere the pipeline can reach. Revenue and profit are defensible from what exists; an ROI would require inventing the denominator |
+
+Two rows moved out of this table during this pass and are worth naming, because
+both were listed as *not built* in an earlier edition of this README:
+**collaboration workflow (FR-25)** is the stage gate and per-role assessment
+described above, and **slide export** now exists — not as a PowerPoint variant of
+the brief, but as four of the twelve pre-sales artefacts, which is what the
+request was actually for.
 
 ---
 
@@ -1284,3 +1381,24 @@ Matching the MVP exclusions in Table 15, plus what this pass did not reach:
 `.env` is gitignored and holds the DeepSeek API key supplied for development.
 That key was shared in plaintext over chat, so **rotate it before any wider
 use**, and issue a separate key for CI.
+
+Every `/api` path now requires a session (`src/radar/auth.py`), which closes the
+two things that made a public deployment unsafe to show anyone: it answered every
+request it received, and anyone with the URL could spend the deployed model key.
+The guard is an application-level dependency rather than a decorator per route,
+because the failure mode of a per-route guard is the route somebody forgot, and
+`tests/test_api_auth.py` walks the router instead of naming endpoints for the
+same reason.
+
+Three things are still absent and are named rather than implied:
+
+* **Per-role authorisation.** Sign-in answers *who*, not *may they*. Every
+  signed-in account can move a stage, delete a space and spend model budget.
+* **Rate limiting on the generation endpoints.** Sign-in bounds who reaches them,
+  not how often.
+* **An audit log** distinct from the workflow transition history.
+
+The seeded account is `orange` / `orange`, flagged `must_change_password`, and
+the interface warns on every screen until that is cleared. Accounts are created
+only from the command line (`radar user add`), so a hijacked session cannot mint
+itself a permanent login.

@@ -23,6 +23,7 @@ ROUTE_GROUPS = [
     ("Signing in", lambda p: p.startswith("/api/auth")),
     ("Meta and health", lambda p: p in ("/api/meta", "/api/health", "/healthz", "/api/refreshes")),
     ("The main read", lambda p: p.startswith(("/api/view", "/api/whitespace", "/api/orphan", "/api/coverage"))),
+    ("Pre-sales collateral", lambda p: "/presales" in p),
     ("One topic", lambda p: p.startswith("/api/topics/")),
     ("Competitors", lambda p: p.startswith("/api/competitors")),
     ("The Planner", lambda p: p.startswith("/api/planner")),
@@ -58,6 +59,7 @@ PURPOSE = {
     "plans": ("Planner", "One portfolio plan: the stated inputs, the projection, the flags and the narrative. The id is a fingerprint of the inputs, so a plan is immutable once computed."),
     "plan_selections": ("Planner", "One row per selected space per plan: entry year, the margin band applied, the overlap discount and the capability pool it draws on."),
     "topic_descriptions": ("Output", "Long-form narrative, each section carrying the signal ids it was written from (FR-14)."),
+    "topic_collateral": ("Output", "One row per pre-sales piece per space per format: which renderer version built it, from which snapshot, and how large the file is — so a piece built before a section existed reads as INCOMPLETE rather than merely old."),
     "topic_briefs": ("Output", "Generated PDF metadata, stamped with every version it printed — including `brief_schema` (FR-18)."),
     "workflow_state": ("Collaboration", "Current stage and owner per topic (FR-25, §4.10 model A)."),
     "workflow_transitions": ("Collaboration", "Full stage history with actor, role and reason."),
@@ -80,6 +82,92 @@ MIGRATION_REASON = {
     ("plans", "pdf_hash"): "Content hash — cache-busts the embedded viewer when a plan is re-exported.",
     ("plans", "pdf_generated_at"): "When the export was rendered.",
     ("plans", "pdf_schema"): "Which renderer version produced it, so an old export can be recognised as stale.",
+}
+
+
+#: Prose that belongs to a route group but cannot be derived from a docstring —
+#: the shape of a family of endpoints rather than the purpose of any one of
+#: them. It lives here rather than being pasted into API.md after generation,
+#: because the generator overwrites the file and a previous edition of this
+#: material was lost exactly that way.
+GROUP_NOTES = {
+    "Signing in": """
+Three endpoints outside the session guard (`login`, `logout`, `session`) and one
+inside it (`password`). `POST /api/auth/login` answers `401` identically for an
+unknown account and a wrong password, and takes the same time over both, so the
+response is not an account oracle. The cookie is `HttpOnly`, `SameSite=Lax`, and
+stored server-side only as its SHA-256 — a copy of the database file is neither a
+set of passwords nor a set of live sessions.
+""",
+    "Pre-sales collateral": """
+Twelve pieces per space (`discovery-pack`, `outreach-sequence`,
+`first-meeting-deck`, `value-hypothesis`, `reference-pack`, `battlecards`,
+`solution-outline`, `demo-scope`, `partner-brief`, `pricing-options`,
+`rfp-boilerplate`, `risk-register`), each in the formats it can honestly be:
+
+| Family | Formats, default first | Why not the others |
+|---|---|---|
+| Documents | `pdf`, `docx`, `odt` | — |
+| Decks | `pptx`, `odp`, `pdf` | A deck flowed into Word stops being a deck. |
+| `rfp-boilerplate` | `docx`, `odt`, `pdf` | Paste-fodder for a Word response; a PDF obstructs. |
+| `outreach-sequence` | `md`, `docx`, `odt`, `pdf` | Pasted into a mail client, not printed. |
+
+`GET .../presales` returns the FULL catalogue whether or not anything has been
+built — what could be produced is as much of the answer as what has been. Each
+item carries `formats[]` (which exist, which are stale) and `builds{}` (the
+detail per format). Formats coexist: asking for `docx` after `pdf` gives both.
+
+An unsupported format is a `400` naming the alternatives, never a silent
+fallback to the default under the wrong extension.
+
+`POST` generates the piece's missing inputs first where they are cheap and
+deterministic (sizing, competition) and one model call where they are not. It
+also runs a short live-research pass against the query-capable sources in
+`sources.yaml`, so the material reflects today rather than the last refresh;
+anything drawn from a retrieved item is attributed inline and listed at the back
+of the document. Set `RADAR_PRESALES_RESEARCH=0` to disable that pass — needed
+for CI, air-gapped builds and any deployment where outbound calls are the thing
+being prevented (NFR-05).
+""",
+    "The Planner": """
+A plan is immutable once computed: its id is a fingerprint of the inputs, the
+config versions and the plan schema, so `POST /api/planner/plans` with the same
+body returns the same plan rather than a second copy of it. `source` selects
+which question is being asked — `parameters` lets the optimiser choose the set
+under a budget and a capacity, `workflow` takes the set as already decided by the
+stage gate and only schedules and costs it. The source is part of the
+fingerprint, so the two can never overwrite each other.
+
+`GET /api/planner/meta` reports what a plan could be built from *right now* —
+how many spaces are sized, how many sit at each stage of the gate, the capability
+pools and the economics version — so the screen can disable a control with a
+reason rather than failing after the fact.
+
+The narrative (`POST .../narrative`) and the PDF (`POST .../report`) are separate
+calls because only the first costs a model call. The projection itself is
+arithmetic and is already complete when the plan is created.
+""",
+    "Generation": """
+Two routes into a run, and they differ in what the caller has to know.
+
+**Parameters.** `GET /api/generate/options` reports what can be asked for and
+whether a run is possible at all; `GET /api/generate/matching` shows the spaces
+that ALREADY satisfy those criteria, so an expensive run is not spent
+rediscovering them.
+
+**Conversation.** `GET /api/generate/chat` opens the scoping interview with a
+map of what the corpus actually holds; each `POST /api/generate/chat` re-embeds
+the WHOLE transcript, retrieves against the same signal vectors the run will use,
+and returns the evidence beside the answer. It is stateless — the transcript
+lives in the browser and arrives with every request. `ready` on a proposed brief
+is the corpus's verdict, not the model's: the brief must clear the retrieval
+floor AND be corroborated on its use case or technology. `model_ready` carries
+the model's own opinion alongside it, and the screen explains a disagreement in
+either direction rather than silently obeying one of them.
+
+`POST /api/generate/hypothesis` is the third route, for a space the external
+corpus is silent about — it is marked as a hypothesis and is not evidence.
+""",
 }
 
 
@@ -110,6 +198,8 @@ def write_api(rows) -> None:
         for method, path, doc in sel:
             doc = (doc or "").replace("|", "\\|")
             body.append(f"| `{method}` | `{path}` | {doc[:147] + '…' if len(doc) > 150 else doc} |")
+        if title in GROUP_NOTES:
+            body.append(GROUP_NOTES[title].rstrip())
     rest = [r for r in rows if r[1] not in used]
     if rest:
         body += ["\n## Other\n", "| Method | Path | Purpose |", "|---|---|---|"]

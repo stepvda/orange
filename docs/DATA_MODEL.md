@@ -1,6 +1,6 @@
 # Data model reference
 
-29 tables in one SQLite file. This is the physical reference; the
+30 tables in one SQLite file. This is the physical reference; the
 diagrams in the Technical Architecture (Figures 7–10 and 12) show the same thing
 with its relationships.
 
@@ -46,7 +46,7 @@ not simply recreated.
 |---|---:|---|
 | `opportunity_signals` | 11,181 | Evidence attachment, recording which refresh first attached each signal — what makes momentum honest. |
 | `opportunity_spaces` | 418 | The canonical unit. Identity is the vertical × use case × technology triple (DR-02, DR-03). |
-| `refreshes` | 37 | One row per run: reference date, replay flag, per-stage statistics, per-source errors. |
+| `refreshes` | 40 | One row per run: reference date, replay flag, per-stage statistics, per-source errors. |
 | `scores` | 1,844 | One row per topic per score kind per computation, with components AND the inputs that produced them (DR-05, SC-10). |
 
 ### Discovery
@@ -88,14 +88,15 @@ not simply recreated.
 | Table | Rows | Purpose |
 |---|---:|---|
 | `topic_briefs` | 174 | Generated PDF metadata, stamped with every version it printed — including `brief_schema` (FR-18). |
+| `topic_collateral` | 15 | One row per pre-sales piece per space per format: which renderer version built it, from which snapshot, and how large the file is — so a piece built before a section existed reads as INCOMPLETE rather than merely old. |
 | `topic_descriptions` | 174 | Long-form narrative, each section carrying the signal ids it was written from (FR-14). |
 
 ### Planner
 
 | Table | Rows | Purpose |
 |---|---:|---|
-| `plan_selections` | 292 | One row per selected space per plan: entry year, the margin band applied, the overlap discount and the capability pool it draws on. |
-| `plans` | 6 | One portfolio plan: the stated inputs, the projection, the flags and the narrative. The id is a fingerprint of the inputs, so a plan is immutable once computed. |
+| `plan_selections` | 294 | One row per selected space per plan: entry year, the margin band applied, the overlap discount and the capability pool it draws on. |
+| `plans` | 7 | One portfolio plan: the stated inputs, the projection, the flags and the narrative. The id is a fingerprint of the inputs, so a plan is immutable once computed. |
 
 ### Collaboration
 
@@ -111,7 +112,7 @@ not simply recreated.
 
 | Table | Rows | Purpose |
 |---|---:|---|
-| `sessions` | 0 | Live sign-ins, keyed by the SHA-256 of the cookie value. A copy of the database file therefore grants no logins. |
+| `sessions` | 23 | Live sign-ins, keyed by the SHA-256 of the cookie value. A copy of the database file therefore grants no logins. |
 | `users` | 1 | Who may sign in. A username and a PBKDF2 verifier — never a password, and no personal data beyond what deciding access needs (DR-09). |
 
 ## The two identity rules

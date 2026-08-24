@@ -6,6 +6,76 @@ features that exposed them.
 
 ---
 
+## The documentation set catches up with the product
+
+**Changed.** Four features had shipped without reaching the design documents at
+all: the Planner, pre-sales collateral, the scoping conversation and sign-in.
+The Functional Design Document and the Technical Architecture had **zero**
+mentions of any of them, and the Technical Architecture still opened its security
+section with a callout headed *"the deployed demonstration is public and
+unauthenticated"* — which had stopped being true.
+
+* **Six new figures**, drawn to the same 0..100 canvas convention as the other
+  twenty-three. Functional: the Planner's two sources over one arithmetic;
+  twelve pre-sales pieces from one snapshot; the two routes into a new space and
+  the gate they share. Technical: the mixed-integer program and its fallback;
+  the collateral build path; access control beside the deletion cascade.
+* **The FDD gains four sections** — creating a space on demand (10b), the
+  Planner (11b), pre-sales collateral (12b), and signing in and deletion (13.5,
+  13.6) — plus six rows in the conceptual data model.
+* **The Technical Architecture gains two** — the Planner's optimiser (9c) and
+  the collateral renderer (9d) — and its security section is rewritten around
+  what `auth.py` actually does, including the three things that are still
+  absent: per-role authorisation, rate limiting on the endpoints that spend
+  model budget, and an audit log.
+* **`build_reference.py` learned to carry prose.** A page of hand-written
+  material about the pre-sales endpoints had been pasted into `API.md` after
+  generation, and the next regeneration silently deleted it. Route-group notes
+  now live in the generator, where they survive.
+* **Nine decisions recorded** (D-14 to D-22), each with the thing it costs:
+  why selection is an optimiser rather than a model, why a committed set is
+  scheduled rather than re-selected, why SOM is discounted before it is summed,
+  why a collateral piece with missing inputs still builds, why the format is the
+  reader's choice, why the corpus enables the Generate button, why the gate
+  judges a sentence rather than a label, why a session lives in the database,
+  and why a delete names the plans it breaks instead of refusing.
+* **The runbook gains the four things it could not tell you**: how to build a
+  plan from either source and what its two failure messages mean, how collateral
+  is built and why there is no CLI command for it, how to manage accounts, and
+  how to delete a space.
+
+---
+
+## Two decks, two films, and a demo that scrolls
+
+**Added.** `Orange_Innovation_Radar_Walkthrough.pptx` and
+`Orange_Innovation_Radar_Demo.mp4` — a deck and a narrated film that show how to
+USE the product, in seven chapters, against the running instance. The existing
+deck and film argue why it is built the way it is, which is a different talk for
+a different room.
+
+* **The chapter cards are the deck's own slides, rendered.** The film does not
+  redraw them, so the two cannot drift.
+* **The browser is headed, not headless.** Three of the seven chapters are
+  largely a PDF on the page — the sales brief, a built pre-sales piece, the plan
+  document — and headless Chromium draws a grey rectangle in place of all three.
+* **It scrolls.** Every long pane is scrolled through rather than shown from the
+  top: the detail pane, the score breakdown, the twelve pre-sales pieces, the
+  analytics charts, the plan. A frame of the first thousand pixels of a screen
+  is not a demonstration of that screen.
+* **One browser context per chapter**, because Playwright finalises a recording
+  when its context closes — which is what makes it possible to cut a chapter
+  card in between. The signed-in session is carried across the seven as saved
+  storage state rather than by signing in seven times on camera.
+* **`build_shots.py` captures the screenshots both decks use**, from the real
+  application at 1920x1080. A deck that illustrates a screen with a drawing of
+  that screen is a deck that drifts.
+* The main deck gains six slides and its figures are re-read from the database;
+  the speaker notes are renumbered to match, and now say which pages to cut
+  first when the room is a sales audience rather than a strategy one.
+
+---
+
 ## The Planner will plan the business you have already committed to
 
 **Added.** A second source for a plan. The Planner asked for parameters and

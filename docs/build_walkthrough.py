@@ -1,5 +1,13 @@
 """Build the hands-on walkthrough video (docs/Orange_Innovation_Radar_Walkthrough.mp4).
 
+SUPERSEDED BY docs/build_demo.py. That build covers everything this one does and
+four subsystems this one predates — the Planner, the pre-sales pack, the scoping
+conversation and sign-in — and it records HEADED, so the embedded PDFs actually
+render. This script is kept because the film it produced is still in docs/ and a
+build that cannot be re-run is a film nobody can correct. Do not extend it;
+extend build_demo.py.
+
+
 A different film from Orange_Innovation_Radar.mp4. That one explains the
 thinking; this one shows a person how to actually use the tool. So the deck is
 cut to three slides — just enough vocabulary to follow along — and the rest is a

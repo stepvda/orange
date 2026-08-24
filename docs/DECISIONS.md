@@ -230,6 +230,195 @@ whole now gets all five.
 
 ---
 
+## D-14 · A plan is selected by an optimiser, not proposed by a model
+
+**Decision.** Portfolio selection is a mixed-integer program solved by
+`scipy.optimize.milp`. The model's only job in the Planner is to *write* the
+plan, after every number in it is already fixed.
+
+**Why.** Selection under constraints is a multi-dimensional knapsack. It solves
+exactly, in under a second at this size, and it explains itself: which constraint
+bound, and what one more euro or one more engineer would buy. A learned
+recommender could do none of that, and NFR-01/NFR-03 require every number to
+decompose. There are also no labels — 418 spaces and zero historical outcomes is
+a spreadsheet, not a training set.
+
+**Cost.** A dependency on scipy, and a greedy fallback that has to be maintained
+beside the solver for the case where scipy is absent or the program is
+infeasible. The fallback names every soft constraint it relaxed, which is the
+only reason it is acceptable at all.
+
+---
+
+## D-15 · A committed set is scheduled, never re-selected
+
+**Decision.** Under `source: workflow` the Planner applies no evidence floor, no
+distance cap, no concentration limit and no objective. Every space the stage gate
+has moved to Demand-tested or beyond is in the plan. `selected_count` equals
+`considered_count`, and a test asserts it.
+
+**Why.** A space at Demand-tested has a salesperson's judgement behind it.
+Dropping it for resting on a modelled size, or for sitting one level too far out
+on portfolio distance, answers a human decision with an assumption band. The
+question in this mode is not "what should we do" — it is "what does what we have
+already committed to actually earn, and when".
+
+**Cost.** The two modes cannot share a code path, so scheduling, flagging,
+exclusion-reporting and the narrative prompt each split on the source. Where the
+committed set over-commits a capability pool the plan reports the gap rather than
+resolving it, which means a plan can contain a finding the reader has to act on
+rather than a set of numbers that balance.
+
+---
+
+## D-16 · SOM is discounted for overlap before it is summed
+
+**Decision.** A second space in a vertical is discounted; a third sharing its use
+case more so. Margin varies by portfolio distance rather than being held at the
+filed segment figure.
+
+**Why.** Obtainable share is computed per topic, against the same customers' same
+budgets. The naive sum across all 418 spaces reaches 90% of Orange Business's
+entire segment revenue, which is not arguable for incremental business in a
+segment declining 5.8% a year — and coverage makes it worse rather than better,
+which is what proves the problem is the aggregation and not the sizing. Applying
+the filed 7.9% margin flat is a second version of the same error: it is a fully
+loaded figure, so it understates L0 (existing offer on existing overhead) and
+overstates L3 (a build carried in opex inside the window).
+
+**Cost.** Two more assumption bands to argue about, and the discount is a
+judgement rather than a measurement. Varying margin by distance moves five-year
+profit by about 1.66×, and revenue concentrates at L0 — so the L0 band dominates
+the answer, and one table from Orange finance is worth more here than any other
+single input including build cost.
+
+---
+
+## D-17 · A collateral piece with missing inputs still builds
+
+**Decision.** Nothing in the pre-sales subsystem refuses to produce a document. A
+piece whose declared inputs are missing is rendered anyway, with a banner naming
+the gap.
+
+**Why.** A pre-sales engineer who asked for a solution outline and got an error
+has nothing. One who got the outline with *"built without the written
+description"* across the top has the component map, the portfolio path and a
+clear instruction about what to do next.
+
+**Cost.** A document can leave the building in a state its author did not
+intend. The mitigation is that the gap is on the page rather than in a log, and
+staleness is tracked per input rather than per space — so a pack whose battlecard
+predates this month's competitor register is visible as such.
+
+---
+
+## D-18 · The format is the reader's choice, per piece
+
+**Decision.** Documents emit as PDF, Word or OpenDocument; decks as PowerPoint,
+OpenDocument or PDF. Formats coexist. A deck is never offered as Word.
+
+**Why.** A battlecard is a PDF in a car park, a Word file on a bid manager's desk
+and an ODF file on an estate that standardised on LibreOffice — and it is the
+same battlecard in all three. Tender blocks are Word because paste-fodder as a
+PDF actively obstructs. A deck flowed into a Word document stops being a deck,
+because one idea per page is the only property that made it one.
+
+**Cost.** Thirty-three (piece, format) pairs that must all say the same thing.
+That is why documents are described as *blocks* and emitters walk them, rather
+than each format being written out — but it is a real cost, and a chart in Word
+is a raster image because Word has no drawing model this code can target.
+
+---
+
+## D-19 · The corpus enables the Generate button, not the model
+
+**Decision.** `ready` on a proposed brief is whether the corpus can actually
+support a run. The model's own opinion travels beside it as `model_ready`, and
+the screen explains either disagreement rather than obeying one of them.
+
+**Why.** Asked "do you have enough?" a model says yes — so overruling an
+over-optimistic model is the obvious half. The other half turned out to matter as
+much: the assistant is told to put a brief forward even while hedging about the
+evidence, because otherwise a genuinely new idea has nothing to press Generate
+on. It duly writes "the evidence is thin, marking this as not ready", which is a
+fair remark about the corpus and a terrible reason to disable a button whose
+brief has already passed the same corroboration check the run applies.
+
+**Cost.** Two flags where a reader expects one, and a screen that has to explain
+a disagreement in either direction.
+
+---
+
+## D-20 · The gate judges the brief's sentence, not its taxonomy labels
+
+*Added after a run that produced nothing, expensively.*
+
+**Decision.** Corroboration is decided by asking the cheap model about the
+brief's own sentence, with the taxonomy labels shown as the approximation they
+are. Its answer overrules a label match. The vocabulary test stays, for display,
+where the two agree.
+
+**Why.** The taxonomy is a set of closed lists, so a proposal is regularly filed
+under the nearest available cell rather than an exact one. A brief for
+advertising-funded municipal screens filed under `citizen_service_automation` ×
+`private_5g`, because nothing closer exists. Tenders for private-5G video
+surveillance corroborate the *label* perfectly and are no evidence whatsoever for
+advertising screens. The gate reported four supporting signals, the button
+enabled, the run spent four model calls, and the critic threw the candidate out
+with precisely that reason.
+
+**Cost.** One cheap model call per proposed brief, and a gate whose verdict is a
+model's judgement rather than a string match — which is exactly what the
+vocabulary test was there to avoid. Keeping the vocabulary test for display is
+the compromise: *"the term 'private 5g' appears in the signal text"* is a more
+checkable thing to show a reader than a model's say-so.
+
+---
+
+## D-21 · Sign-in is a session in the database, not a signed token
+
+**Decision.** An `HttpOnly`, `SameSite=Lax` cookie, stored server-side only as
+its SHA-256, checked by an application-level dependency rather than a decorator
+per route. Passwords are PBKDF2-HMAC-SHA256 verifiers from the standard library.
+
+**Why.** A JWT cannot be revoked without server state, which puts the state back
+anyway — and the thing an operator actually wants ("sign that account out
+everywhere, now") is one `DELETE` here and impossible there. The database is a
+file on a share, so a copy of it must not be a set of live sessions or a set of
+passwords. PBKDF2 is not the best KDF; it is the best one available with **no new
+dependency**, which is what keeps the sovereign-deployment option cheap. And the
+failure mode of a per-route guard is the route somebody forgot, which is why the
+test walks the router rather than naming endpoints.
+
+**Cost.** A sessions table to sweep, and a KDF weaker than argon2. Sign-in
+answers *who*; it does not yet answer *may they* — per-role authorisation on the
+write endpoints is still absent, and so is rate limiting on the endpoints that
+spend model budget.
+
+---
+
+## D-22 · A delete is legible before it is taken, and signals survive it
+
+**Decision.** The delete dialog asks the server for the impact and reads it out
+before showing the button. Only attachment rows go; the signals themselves stay.
+Duplicates folded into the space go with it. A plan that selected the space is
+named rather than blocking the delete.
+
+**Why.** The `DELETE` was never the hard part — thirteen tables point at a space
+and the keys already cascade. A signal is evidence about the world that several
+spaces may cite, collected under DR-01 and retained for replay under DR-14;
+deleting a synthesis result must not delete the reading it was synthesised from.
+And refusing the delete would make any space that ever appeared in a plan
+permanent, while silently breaking the plan would be worse.
+
+**Cost.** A plan's stored `projection` and `selected_count` — computed once and
+immutable by design — go on counting a space that no longer exists. That is
+declared rather than repaired. **Deletion is also not suppression**: identity is
+the taxonomy triple, so a later refresh meeting the same triple will synthesise
+the space again, with a new id.
+
+---
+
 ## Open decisions
 
 These need a human and are not engineering tasks.
@@ -241,4 +430,8 @@ These need a human and are not engineering tasks.
 | **May a browser User-Agent be used?** | See D-09. Twelve competitor profiles depend on the answer. |
 | **What is the refresh cadence?** | Drives connector design and cost more than any other choice. Currently a 14-day period, which is also the unit the lifecycle counts in. |
 | **Do internal taxonomies exist?** | The 59 use cases and 38 technologies are a drafted Sprint 0 deliverable and should be replaced if an internal catalogue exists. |
+| **What is the real margin by portfolio distance?** | `config/economics.yaml` carries planning bands anchored on the filed 7.9% segment figure. Varying margin by distance rather than holding it flat moves five-year profit by about 1.66×, and revenue concentrates at L0 — so one table from Orange finance is worth more than any other single input to the Planner. |
+| **How much capability-pool headcount is free for new work?** | `pool_availability` decides how many spaces a plan can start at once, and the shipped default is a guess. It is the constraint that binds first in most parameter plans. |
+| **Who owns the economics assumptions?** | `owner:` currently reads `innovation-radar-curator`, which is a placeholder. Every plan prints it on its last page. |
+| **Which accounts should exist, and who administers them?** | Sign-in exists; per-role authorisation on the write endpoints does not. Today every signed-in account can move a stage, delete a space and spend model budget. |
 | **Terms of use** | Unconfirmed for several enabled sources. A Sprint 0 blocker, not a runtime concern. |
