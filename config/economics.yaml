@@ -1,0 +1,159 @@
+# Planning economics — the assumptions the Planner turns a market size into money with.
+#
+# THE SAME DISCIPLINE AS config/sizing.yaml. Every number here is an assumption
+# with a named owner and a version, printed on the last page of every plan it
+# produces. Two figures are taken from Orange's own published accounts and are
+# marked as such; everything else is a planning band, and a plan built under one
+# version of this file is not comparable with a plan built under another.
+#
+# CHANGING ANY BAND REQUIRES A NEW economics_version. Projections across a
+# version boundary are not comparable, every plan records the version that
+# produced it, and the interface will not chart two plans together silently.
+
+economics_version: "econ-2026-08-a"
+owner: "innovation-radar-curator"        # TO BE REPLACED by a named Orange owner
+source_filing: "Orange 2025 Universal Registration Document, filed with the AMF 2 April 2026"
+
+# ---------------------------------------------------------------------------
+# Filed figures. Not assumptions — quoted, with the section they come from.
+# ---------------------------------------------------------------------------
+filed:
+  # §7.3, page 221. The "Enterprise" cash-generating unit IS Orange Business.
+  # Used to discount the profit stream. The 2024 figure was 7.1%; the rise is
+  # part of why the segment took a 332m euro goodwill impairment in 2025.
+  discount_rate_post_tax: 0.073
+  discount_rate_pre_tax: 0.097
+  perpetuity_growth: 0.005
+  # §3.1.3.4, page 143. Segment EBITDAaL / revenue. This is the ANCHOR for the
+  # margin bands below, and the reason they are anchored on 7.9% rather than on
+  # the Group's 30.9% — the Group figure is driven by infrastructure businesses
+  # and would overstate B2B services profit roughly fourfold.
+  segment_ebitdaal_margin: 0.079
+  segment_revenue_eur_m: 7325
+  segment_revenue_trend: -0.058          # declining; the plausibility check needs it
+  segment_avg_employees: 29415
+
+# ---------------------------------------------------------------------------
+# Margin by portfolio distance.
+#
+# THE SINGLE MOST CONSEQUENTIAL ASSUMPTION IN THIS FILE. The filed 7.9% is a
+# FULLY LOADED segment margin — after all overhead. Applying it flat to
+# incremental revenue asserts that new business carries the same overhead as
+# existing business, which is systematically wrong in both directions:
+#
+#   L0/L1  sell an existing offer on existing overhead. True contribution
+#          margin is HIGHER, so a flat 7.9% understates them.
+#   L3/L4  require a capability build whose cost lands in operating expense.
+#          True margin is LOWER, so a flat 7.9% overstates them.
+#
+# Varying margin by distance rather than holding it flat moves five-year profit
+# by about 1.66x, and revenue concentrates at L0 — so the L0 band dominates the
+# answer. One table from Orange finance is worth more here than any other single
+# input, including build cost.
+# ---------------------------------------------------------------------------
+margin_by_distance:
+  note: >-
+    Planning bands anchored on the filed 7.9% segment EBITDAaL margin. L0 sits
+    above it because the offer and the overhead already exist; L3 sits below
+    because the build is carried in opex during the plan window.
+  L0: 0.14
+  L1: 0.11
+  L2: 0.079        # the filed figure itself: partner-dependent, average economics
+  L3: 0.03
+  L4: 0.00         # no plausible delivery path; earns nothing inside the window
+
+# ---------------------------------------------------------------------------
+# Ramp to steady state, by time horizon.
+#
+# Share of a space's obtainable market reached in each year AFTER ITS OWN ENTRY
+# YEAR — not after the start of the plan. A space entering in year 3 is in the
+# first year of its own ramp, which is what makes staggered entry cost something
+# rather than being free.
+# ---------------------------------------------------------------------------
+ramp_by_horizon:
+  note: >-
+    Assumed S-curves. The most defensible replacement is Orange's own historical
+    revenue ramp on comparable engagements; until that exists these are declared
+    assumptions and the sensitivity is reported with every plan.
+  now:   [0.10, 0.30, 0.55, 0.80, 1.00]
+  next:  [0.00, 0.10, 0.30, 0.60, 0.85]
+  later: [0.00, 0.00, 0.05, 0.20, 0.45]
+
+# ---------------------------------------------------------------------------
+# Execution capacity — why Orange cannot enter 400 spaces at once.
+#
+# Two independent limits, and both bind in practice:
+#
+#   entry slots     How many NEW spaces the organisation can start in one year
+#                   at all, regardless of who staffs them. Governance, bid
+#                   capacity, partner onboarding, sales enablement.
+#   capability pool The people. Every space maps to at least one pool in the
+#                   business graph, and the graph carries real headcount:
+#                   IoT experts 400 and Defense & security 250 are claimed by
+#                   288 and 246 spaces respectively. Those two pools bind long
+#                   before budget does.
+# ---------------------------------------------------------------------------
+capacity:
+  # New spaces started per plan year, before effort weighting.
+  entry_slots_per_year: 12
+  # Share of a pool's headcount available for NEW opportunity work. The rest is
+  # running the existing business, which is 94% of revenue.
+  pool_availability: 0.15
+  # Person-years consumed IN THE ENTRY YEAR, by portfolio distance. An L0 entry
+  # is a sales and packaging motion; an L3 entry is a capability build.
+  entry_effort_person_years:
+    L0: 3
+    L1: 8
+    L2: 15
+    L3: 40
+    L4: 80
+  # Person-years per year to sustain a live space once entered, per million
+  # euros of revenue it is carrying. Delivery scales with revenue.
+  sustain_person_years_per_eur_m: 0.9
+  # A capability built for one space is available to the others that need it.
+  # Share of the entry effort saved on the SECOND and subsequent space needing
+  # the same pool and technology in the same plan.
+  shared_build_discount: 0.6
+
+# ---------------------------------------------------------------------------
+# Aggregation guards.
+#
+# SOM IS NOT ADDITIVE, and this is the constraint that keeps a plan honest.
+# Obtainable share is computed per topic, independently, against the same
+# customers' same budgets. Summing selected spaces double-counts, and coverage
+# makes it worse rather than better: across all 418 spaces the naive sum reaches
+# 90% of the segment's entire revenue, which is not arguable for INCREMENTAL
+# business in a segment declining at 5.8% a year.
+# ---------------------------------------------------------------------------
+aggregation:
+  # Applied to the 2nd and subsequent selected space sharing a vertical, on the
+  # basis that they compete for one buying centre's budget.
+  overlap_discount_same_vertical: 0.35
+  # And again, more weakly, where they also share a use case.
+  overlap_discount_same_use_case: 0.20
+  # A plan whose year-5 incremental revenue exceeds this share of the filed
+  # segment revenue is FLAGGED. Not blocked — flagged, with the arithmetic
+  # shown, because the honest response to an implausible total is to say so.
+  plausibility_flag_share_of_segment: 0.15
+
+# ---------------------------------------------------------------------------
+# Defaults for a plan when the caller does not state otherwise.
+# ---------------------------------------------------------------------------
+defaults:
+  plan_years: 5
+  objective: "profit"                    # profit | revenue | npv | strategic_coverage
+  min_confidence: "partial"              # observed | partial | modelled
+  max_portfolio_distance: 3
+  # Share of ENTRY EFFORT that may go to any one vertical or technology. The
+  # concentration control: ranking by market size alone puts 18 of the top 20
+  # spaces in manufacturing, so without this the optimiser returns a
+  # single-vertical plan and calls it a portfolio.
+  max_share_per_vertical: 0.40
+  max_share_per_technology: 0.35
+  # Three-horizons discipline. Shares of selected spaces, with tolerance, so a
+  # plan cannot spend everything on safe near-term wins.
+  horizon_mix:
+    now: 0.55
+    next: 0.30
+    later: 0.15
+  horizon_tolerance: 0.20

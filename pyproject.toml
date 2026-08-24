@@ -21,7 +21,9 @@ dependencies = [
 
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=2.7"]
-dev = ["pytest>=8.0"]
+# PyMuPDF reads the generated PDFs back, so the brief and plan tests can assert
+# what a reader actually sees rather than that a file was written.
+dev = ["pytest>=8.0", "pymupdf>=1.24"]
 
 [project.scripts]
 radar = "radar.cli:main"

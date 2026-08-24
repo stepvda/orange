@@ -305,6 +305,13 @@ class Config:
         # §4.3.4 market sizing. Kept beside the other crosswalks because it is
         # the same kind of object and carries the same risk (§4.5.2).
         self.sizing = _load_yaml("sizing.yaml")
+        # Planning economics (the Planner). Optional: the radar runs without it,
+        # and only the Planner requires it — so a deployment that never plans is
+        # not forced to carry an assumption set nobody owns.
+        try:
+            self.economics = _load_yaml("economics.yaml")
+        except FileNotFoundError:
+            self.economics = {}
         self.vertical_to_nace: dict[str, list[NaceRow]] = {}
         for row in _load_csv("crosswalks", "vertical_to_nace.csv"):
             entry = NaceRow(
@@ -361,6 +368,17 @@ class Config:
     @property
     def competitor_version(self) -> str:
         return self.competitors_raw["version"]
+
+    @property
+    def economics_version(self) -> str:
+        """SC-10's rule applied to plans: a projection records the bands that made it.
+
+        Two plans built under different `economics.yaml` versions are not
+        comparable — the margin bands alone move five-year profit by about 1.66x
+        — so the version travels on every plan row and the interface refuses to
+        chart across a boundary silently.
+        """
+        return self.economics.get("economics_version", "unversioned")
 
     @property
     def sizing_version(self) -> str:

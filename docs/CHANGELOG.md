@@ -6,6 +6,54 @@ features that exposed them.
 
 ---
 
+## The Planner
+
+**Added.** A portfolio planner: stated constraints in, a selected set of
+opportunity spaces out, with five years of revenue and profit and a written
+business plan explaining them. Assumptions in `config/economics.yaml`, versioned
+as `economics_version` and carried on every plan.
+
+* **Selection is an optimisation, not a ranking.** A mixed-integer program
+  (scipy `optimize.milp`, HiGHS) maximises the objective subject to entry slots
+  per year, capability-pool headcount, concentration caps per vertical and
+  technology, and a target now/next/later mix. Greedy fallback when HiGHS is
+  unavailable.
+* **Capability is a real constraint.** Entry effort is charged against
+  capability pools at a stated availability, so a pool at its ceiling is the
+  reason a plan is the size it is — and the plan says which constraint bound it.
+* **Obtainable share is not additive.** Spaces in the same vertical compete for
+  one buying centre, so the aggregate is discounted before it is summed. Naive
+  sums implied 42–90% of segment revenue; the discounted plan lands at 6–9%.
+* **The money comes from Orange's own filings.** Margin (7.9% segment EBITDAaL)
+  and discount rate (7.3% post-tax) are quoted from the 2025 Universal
+  Registration Document. Nothing in the projection is a chosen number.
+* **A plausibility check that fires.** Year-5 revenue above a stated share of
+  filed segment revenue is flagged on the plan rather than left for the reader.
+* **The narrative may not state a figure.** Every number is the optimiser's;
+  sections that introduce one are stripped and listed.
+* **Export to PDF** — inputs (with the effective value of anything unstated and
+  where it came from), the projection with charts, every selected space with the
+  one-paragraph summary from its own long-form description, the business plan,
+  and the assumptions with their owner and versions. Read inside the browser on
+  a Document tab; downloadable from there.
+* Two new tables (`plans`, `plan_selections`) and five columns recording the
+  export, added through the additive migration list.
+* Two new CLI commands: `plan` (with `--narrate` and `--pdf`) and `plans`.
+* A full-screen Planner module with six hand-drawn SVG charts.
+
+**Fixed — an unstated input read as an absent one.** The export listed only the
+parameters a user had set, which misrepresented what the optimiser actually ran
+with: an unset parameter falls back to the economics default and the plan is
+built against *that*. Every row now carries its effective value and its source.
+
+**Fixed — a concentration cap could make every plan infeasible.** With one
+group, `count ≤ cap × total` implies `total ≤ 0`, so the optimiser returned
+nothing at all. The cap is now skipped where there is only one group, and an
+infeasible problem raises naming the binding constraints instead of returning an
+empty portfolio.
+
+---
+
 ## Competitor intelligence
 
 **Added.** A subsystem that reads what each competitor publishes about itself and

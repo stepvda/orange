@@ -680,6 +680,174 @@ def recompute_competition(topic_id: str) -> dict[str, Any]:
     return competition_for_topic(_db, topic_id) or {}
 
 
+
+# ---------------------------------------------------------------------------
+# The Planner (strategy engine)
+# ---------------------------------------------------------------------------
+
+
+class PlanIn(BaseModel):
+    label: str = "Untitled plan"
+    objective: str = "profit"
+    plan_years: int = 5
+    budget_person_years: float | None = None
+    entry_slots_per_year: int | None = None
+    pool_availability: float | None = None
+    min_confidence: str = "partial"
+    max_portfolio_distance: int = 3
+    geographies: list[str] = []
+    exclude_verticals: list[str] = []
+    exclude_technologies: list[str] = []
+    prefer_verticals: list[str] = []
+    prefer_domains: list[str] = []
+    max_share_per_vertical: float | None = None
+    max_share_per_technology: float | None = None
+    max_competition: str | None = None
+
+
+@app.get("/api/planner/meta")
+def planner_meta() -> dict[str, Any]:
+    """Everything the plan form needs: the assumption set, and what is plannable.
+
+    The assumptions are served rather than hard-coded into the frontend because
+    they are configuration with an owner, and a form that silently disagreed
+    with the engine would be worse than no form.
+    """
+    econ = _cfg.economics or {}
+    plannable = _db.query_one("""
+        SELECT COUNT(DISTINCT o.id) n FROM opportunity_spaces o
+        JOIN market_sizes m ON m.opportunity_id=o.id AND m.method='bottom_up_adoption'
+        WHERE o.merged_into IS NULL AND o.state IN ('active','watchlist','fading')
+          AND m.som_base > 0""")["n"]
+    by_conf = {r["confidence"]: r["n"] for r in _db.query(
+        "SELECT confidence, COUNT(DISTINCT opportunity_id) n FROM market_sizes "
+        "WHERE method='bottom_up_adoption' GROUP BY 1")}
+    pools = []
+    for r in _db.query("SELECT label, attributes FROM graph_nodes WHERE node_type='capability_pool'"):
+        a = unjs(r["attributes"], {}) or {}
+        pools.append({"label": r["label"], "headcount": a.get("headcount", 0)})
+    return {
+        "economics_version": econ.get("economics_version"),
+        "owner": econ.get("owner"),
+        "source_filing": econ.get("source_filing"),
+        "filed": econ.get("filed", {}),
+        "defaults": econ.get("defaults", {}),
+        "margin_by_distance": {k: v for k, v in (econ.get("margin_by_distance") or {}).items()
+                               if k != "note"},
+        "ramp_by_horizon": {k: v for k, v in (econ.get("ramp_by_horizon") or {}).items()
+                            if k != "note"},
+        "capacity": econ.get("capacity", {}),
+        "aggregation": econ.get("aggregation", {}),
+        "pools": sorted(pools, key=lambda p: -p["headcount"]),
+        "plannable_spaces": plannable,
+        "sizes_by_confidence": by_conf,
+        "verticals": [{"id": v.id, "label": v.label} for v in _cfg.verticals],
+        "domains": [{"id": d.id, "label": d.label} for d in _cfg.domains],
+    }
+
+
+@app.get("/api/planner/plans")
+def planner_plans(limit: int = Query(25)) -> dict[str, Any]:
+    """Stored plans, most recent first, with their headline figures."""
+    from .planner import list_plans
+    return {"plans": list_plans(_db, limit)}
+
+
+@app.get("/api/planner/plans/{plan_id}")
+def planner_plan(plan_id: str) -> dict[str, Any]:
+    """One plan in full: inputs, selections, projection, capacity, flags, narrative."""
+    from .planner import Planner
+    plan = Planner(_cfg, _db).get(plan_id)
+    if plan is None:
+        raise HTTPException(404, f"No such plan: {plan_id}")
+    return plan
+
+
+@app.post("/api/planner/plans")
+def create_plan(payload: PlanIn) -> dict[str, Any]:
+    """Select, schedule and project. Arithmetic only — no model call, so it is fast."""
+    from .planner import Planner, PlanInputs
+    try:
+        return Planner(_cfg, _db).plan(PlanInputs.from_dict(payload.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+
+
+@app.post("/api/planner/plans/{plan_id}/narrative")
+def narrate_plan(plan_id: str) -> dict[str, Any]:
+    """Write the business plan. One model call, and it may not introduce a number."""
+    from .planner import Planner
+    try:
+        return Planner(_cfg, _db, llm=_llm()).narrate(plan_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.get("/api/planner/plans/{plan_id}/report")
+def plan_report_status(plan_id: str) -> dict[str, Any]:
+    """Whether an exported PDF exists for this plan, and whether it is current."""
+    from .plan_report import plan_report_meta
+    plan = _db.query_one("SELECT id, narrative FROM plans WHERE id = ?", (plan_id,))
+    if plan is None:
+        raise HTTPException(404, f"No plan {plan_id}")
+    meta = plan_report_meta(_db, plan_id)
+    if meta is not None:
+        meta.pop("path", None)   # a server filesystem path is nobody's business over HTTP
+    return {"plan_id": plan_id, "generated": meta is not None, "report": meta,
+            "narrative_available": bool(plan["narrative"])}
+
+
+@app.post("/api/planner/plans/{plan_id}/report")
+def build_plan_report(plan_id: str) -> dict[str, Any]:
+    """Render the whole plan — inputs, projection, spaces, narrative, assumptions.
+
+    Rebuilt on every POST rather than served from cache, because the narrative
+    can be written after the plan is computed and a reader who exported before
+    that would otherwise get a document quietly missing its business plan.
+    """
+    from .plan_report import PlanReportBuilder
+    from .planner import Planner
+    try:
+        plan = Planner(_cfg, _db).get(plan_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    try:
+        result = PlanReportBuilder(_cfg, _db).build(plan)
+        result.pop("path", None)
+        result["url"] = f"/api/planner/plans/{plan_id}/report.pdf"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Plan report failed for %s", plan_id)
+        raise HTTPException(500, f"Plan report generation failed: {exc}") from exc
+
+
+@app.get("/api/planner/plans/{plan_id}/report.pdf")
+def plan_report_pdf(plan_id: str, download: bool = Query(False)) -> FileResponse:
+    """The document itself, inline so the Planner can embed it in the browser."""
+    from .plan_report import plan_report_meta
+    meta = plan_report_meta(_db, plan_id)
+    if meta is None or not meta["exists"]:
+        raise HTTPException(404, f"No report generated for {plan_id}. POST to this path first.")
+    disposition = "attachment" if download else "inline"
+    return FileResponse(
+        meta["path"], media_type="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{meta["filename"]}"',
+                 "Cache-Control": "no-store"},
+    )
+
+
+@app.delete("/api/planner/plans/{plan_id}")
+def delete_plan(plan_id: str) -> dict[str, Any]:
+    """Discard a plan. Its selections go with it; the exported PDF is left on disk."""
+    with _db.cursor() as cur:
+        cur.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
+    return {"deleted": plan_id}
+
+
 @app.get("/api/topics/{topic_id}/competitor-analysis")
 def competitor_analysis(topic_id: str) -> dict[str, Any]:
     """What each competitor on this topic is doing, and how Orange differentiates.

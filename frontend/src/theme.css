@@ -1518,3 +1518,167 @@ table.data td.num { font-family: var(--mono); text-align: right; }
   color: var(--text-muted); margin: 0 0 6px;
 }
 .cov-unread p { font-size: 11.5px; margin: 0 0 5px; }
+
+/* ---------- the Planner ----------
+ *
+ * Full screen, because a plan is a statement about the portfolio rather than
+ * about any one space. The layout keeps the standing division visible: the
+ * parameters that produced it on the left, what was computed in the middle,
+ * and the written half only when somebody asks for it.
+ */
+.planner-btn {
+  background: var(--surface-2); border: 1px solid var(--accent);
+  color: var(--accent-text); font-weight: 600;
+}
+.planner-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+.pl-screen .fs-title { max-width: 62%; }
+/* The provenance line. High in the page on purpose: a reader deciding how much
+   to trust a projection needs to know which figures are Orange's own first. */
+.pl-provenance-head {
+  font-size: 10.5px; color: var(--text-muted); margin: 4px 0 0; line-height: 1.5;
+}
+.pl-provenance-head strong { color: var(--accent-text); }
+
+.pl-body { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0; overflow: hidden; }
+.pl-side {
+  border-right: 1px solid var(--border); padding: 14px 16px; overflow-y: auto;
+  background: var(--surface-1);
+}
+.pl-side h3 { font-size: 12px; margin: 0 0 12px; text-transform: uppercase;
+              letter-spacing: .06em; color: var(--text-muted); }
+.pl-main { padding: 16px 20px; overflow-y: auto; }
+
+.pl-form label { display: block; margin-bottom: 14px; }
+.pl-form label > span {
+  display: block; font-size: 11.5px; font-weight: 600; margin-bottom: 4px;
+}
+.pl-form input[type="text"], .pl-form input:not([type]), .pl-form input[type="number"],
+.pl-form select { width: 100%; font-size: 12px; padding: 4px 6px; }
+.pl-form input[type="range"] { width: 100%; }
+.pl-form em {
+  display: block; font-size: 10.5px; color: var(--text-muted);
+  font-style: normal; margin-top: 3px; line-height: 1.45;
+}
+.pl-run {
+  width: 100%; background: var(--accent); color: #fff; border: none;
+  padding: 8px; border-radius: 5px; font-weight: 600; font-size: 12.5px; cursor: pointer;
+}
+.pl-run:disabled { opacity: .6; cursor: default; }
+.pl-rewrite { margin-top: 14px; }
+.pl-form-note { font-size: 10.5px; color: var(--text-muted); margin-top: 8px; line-height: 1.5; }
+
+.pl-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.pl-stat {
+  border: 1px solid var(--border); border-radius: 7px; padding: 9px 11px;
+  background: var(--surface-2); display: flex; flex-direction: column; gap: 2px;
+}
+.pl-stat.accent { border-left: 3px solid var(--accent); }
+.pl-stat.warn { border-left: 3px solid var(--status-warn, #a06000); }
+.pl-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+                 color: var(--text-muted); }
+.pl-stat-value { font-size: 19px; font-weight: 650; font-family: var(--mono); }
+.pl-stat-sub { font-size: 10px; color: var(--text-muted); }
+
+.pl-flag {
+  margin-top: 10px; padding: 8px 11px; border-radius: 6px; font-size: 11.5px;
+  border-left: 3px solid var(--status-warn, #a06000); background: var(--surface-1);
+}
+.pl-flag.high { border-left-color: var(--status-bad, #a82820); }
+.pl-flag strong { text-transform: uppercase; font-size: 9.5px; letter-spacing: .06em;
+                  margin-right: 6px; color: var(--text-muted); }
+
+.pl-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 14px; margin-top: 16px;
+}
+.pl-chart {
+  margin: 0; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; background: var(--surface-2);
+}
+.pl-chart figcaption { margin-bottom: 6px; }
+.pl-chart-title { font-size: 12px; font-weight: 600; display: block; }
+.pl-chart-note { font-size: 10px; color: var(--text-muted); display: block; margin-top: 1px; }
+
+.pl-binding { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.pl-binding h4 { font-size: 12px; margin: 0 0 3px; }
+.pl-binding ul { margin: 6px 0 0 18px; }
+.pl-binding li { font-size: 11.5px; margin-bottom: 3px; }
+
+.pl-table td { vertical-align: top; font-size: 11.5px; }
+.pl-stmt { font-size: 10.5px; color: var(--text-muted); max-width: 380px; margin-top: 2px; }
+.pl-pool { font-size: 10.5px; color: var(--text-secondary); }
+.pl-link { background: none; border: none; color: var(--accent-text);
+           font-family: var(--mono); font-size: 11px; cursor: pointer; padding: 0; }
+.pl-exclusions { margin-top: 16px; }
+.pl-exclusions summary { font-size: 11.5px; color: var(--text-muted); cursor: pointer; }
+.pl-reason { font-size: 10.5px; color: var(--text-muted); }
+
+.pl-empty { max-width: 620px; padding: 18px 0; }
+.pl-empty h3 { font-size: 15px; margin: 0 0 6px; }
+.pl-empty p { font-size: 12.5px; }
+.pl-filings {
+  border-left: 3px solid var(--accent); background: var(--surface-1);
+  padding: 9px 12px; border-radius: 0 6px 6px 0; font-size: 12px;
+}
+
+.pl-narrative { max-width: 760px; }
+.pl-headline {
+  font-size: 16px; line-height: 1.5; border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 14px; margin: 4px 0 18px; font-weight: 500;
+}
+.pl-narrative section { margin-bottom: 16px; }
+.pl-narrative h4 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-muted); margin: 0 0 4px;
+}
+.pl-narrative p { font-size: 13px; line-height: 1.6; margin: 0; }
+
+.pl-assumptions { max-width: 700px; }
+.pl-assumptions h4 { font-size: 12px; margin: 16px 0 6px; }
+.pl-provenance {
+  margin-top: 16px; font-size: 10.5px; color: var(--text-muted);
+  border-top: 1px solid var(--border); padding-top: 6px; font-family: var(--mono);
+}
+
+@media (max-width: 1080px) {
+  .pl-body { grid-template-columns: 1fr; }
+  .pl-side { border-right: none; border-bottom: 1px solid var(--border); }
+}
+
+/* --- Planner: the plan as one document ---------------------------------- */
+
+.pl-export {
+  width: 100%; margin-top: 12px; padding: 8px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 5px; font-weight: 600; font-size: 12px;
+}
+.pl-export:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pl-export:disabled { opacity: .6; cursor: default; }
+
+/* The embed fills the pane rather than sitting in a fixed box: a PDF read in a
+   short window is a PDF nobody reads past page one. */
+.pl-doc { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; }
+.pl-doc-bar {
+  display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: 7px; padding: 9px 11px;
+  background: var(--surface-2); font-size: 11.5px; line-height: 1.5; color: var(--text-muted);
+}
+.pl-doc-bar strong { color: var(--text); }
+.pl-doc-warn { color: var(--warn, #8a5a00); font-weight: 600; }
+.pl-doc-btn {
+  flex: none; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 11.5px;
+  font-weight: 600; text-decoration: none; white-space: nowrap;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+}
+.pl-doc-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pl-doc-btn:disabled { opacity: .6; cursor: default; }
+.pl-doc-frame {
+  flex: 1 1 auto; min-height: 560px; width: 100%;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2);
+}
+.pl-doc-empty {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; color: var(--text-muted); font-size: 12.5px;
+  border: 1px dashed var(--border); border-radius: 7px; padding: 40px;
+}

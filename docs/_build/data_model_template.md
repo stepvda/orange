@@ -29,9 +29,7 @@ movement — which is what makes it safe to run against the deployed file where 
 feedback and assessments the pipeline never saw are the whole reason that file is
 not simply recreated.
 
-| Table | Column | Added for |
-|---|---|---|
-| `topic_briefs` | `brief_schema` | Distinguishing an INCOMPLETE brief (missing a section that current briefs carry) from a merely STALE one. |
+{{MIGRATIONS}}
 
 ## Tables
 {{TABLES}}

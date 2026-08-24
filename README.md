@@ -82,6 +82,8 @@ Useful commands:
 | `radar competitor-scrape` | Crawl competitor sites into the profiling corpus, robots-aware |
 | `radar competitor-profile` | Build a structured profile per competitor from that corpus |
 | `radar competitor-analysis` | Per-topic competitor analysis and the differentiation angle |
+| `radar plan --narrate --pdf` | Build a five-year portfolio plan, write the business plan, export it as one PDF |
+| `radar plans` | List stored plans with their headline figures |
 | `radar internal add \| moderate \| promote` | Internal signal intake — conversations, RFP themes, lost deals |
 
 ---
@@ -585,6 +587,56 @@ needs that component — and the demotion is recorded in the brief.
 
 reportlab renders it rather than an HTML-to-PDF pipeline: no browser dependency,
 which matters for the sovereign deployment option (NFR-05).
+
+### The Planner, and what it is allowed to promise
+
+The radar answers "which opportunity", one space at a time. The Planner answers
+"which opportunities, in what order, and what do they earn" — which is a
+different question, and the reason it opens full screen rather than in a pane.
+
+**Selection is an optimisation, not a ranking.** A ranked list assumes you can
+take the top N, and you cannot: Orange cannot enter 400 spaces at once, or even
+twelve in one vertical. A mixed-integer program (scipy `optimize.milp`, HiGHS)
+maximises the stated objective subject to entry slots per year, capability-pool
+headcount at a stated availability, concentration caps per vertical and
+technology, and a target now/next/later mix. The plan then reports **which
+constraint bound it** — the thing a ranked list cannot tell you, because the
+answer is a constraint rather than a score.
+
+**Obtainable share is not additive.** Two spaces selling to the same buying
+centre in the same vertical do not sum, so the aggregate is discounted before it
+is totalled. Summing naively implied 42–90% of Orange Business's segment
+revenue; discounted and capacity-constrained, a plan lands at 6–9% — and
+anything above a stated share of filed segment revenue is flagged on the plan
+rather than left for the reader to notice.
+
+**The money is Orange's own.** The margin applied to revenue (7.9% segment
+EBITDAaL) and the rate used to discount it (7.3% post-tax) are quoted from the
+2025 Universal Registration Document filed with the AMF, not chosen here.
+Everything else is a planning band with a named owner in
+`config/economics.yaml`, versioned as `economics_version` and carried on every
+plan — because a plan built under one version of these assumptions is not
+comparable with a plan built under another.
+
+**The narrative may not state a figure.** The business plan is one model call
+over the computed plan, under the same discipline as the topic description: a
+sentence that disagreed with the table beside it would be a defect the reader
+has to adjudicate. Sections that introduce a number are stripped and listed.
+
+**ROI is not offered, and that is deliberate.** There is no cost data — not in
+the filings at the granularity a space would need, not anywhere the pipeline can
+reach. A five-year *revenue and profit* projection is defensible from what
+exists; an ROI would require inventing the denominator.
+
+**Export to PDF.** A plan that has to leave the tool to be read is a plan that
+gets read in a stale copy, so the export is a **Document tab** that renders the
+PDF and shows it in the browser: the stated inputs (with the effective value of
+anything unstated, and where it came from), the projection with its charts,
+every selected space with the one-paragraph summary from its own long-form
+description, the business plan, and the assumptions with their owner and
+versions. It rebuilds on open rather than serving a cache, because the narrative
+can be written after the plan was computed. Download and open-in-a-new-tab are
+what you do after you have seen it.
 
 ### Three panes, sized by the reader
 

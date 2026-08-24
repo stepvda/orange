@@ -24,6 +24,7 @@ ROUTE_GROUPS = [
     ("The main read", lambda p: p.startswith(("/api/view", "/api/whitespace", "/api/orphan", "/api/coverage"))),
     ("One topic", lambda p: p.startswith("/api/topics/")),
     ("Competitors", lambda p: p.startswith("/api/competitors")),
+    ("The Planner", lambda p: p.startswith("/api/planner")),
     ("Collaboration", lambda p: p.startswith(("/api/workflow", "/api/divergence", "/api/feedback", "/api/links"))),
     ("Analytics", lambda p: p.startswith("/api/analytics")),
     ("Generation", lambda p: p.startswith("/api/generate")),
@@ -53,6 +54,8 @@ PURPOSE = {
     "competitor_pages": ("Competitor intel", "Crawled competitor pages — URL plus a bounded extract, never a mirror."),
     "competitor_profiles": ("Competitor intel", "One structured profile per competitor, or a recorded reason why there is none."),
     "topic_competitor_analysis": ("Competitor intel", "Per-topic join (always present) plus the written comparison (NULL until asked for)."),
+    "plans": ("Planner", "One portfolio plan: the stated inputs, the projection, the flags and the narrative. The id is a fingerprint of the inputs, so a plan is immutable once computed."),
+    "plan_selections": ("Planner", "One row per selected space per plan: entry year, the margin band applied, the overlap discount and the capability pool it draws on."),
     "topic_descriptions": ("Output", "Long-form narrative, each section carrying the signal ids it was written from (FR-14)."),
     "topic_briefs": ("Output", "Generated PDF metadata, stamped with every version it printed — including `brief_schema` (FR-18)."),
     "workflow_state": ("Collaboration", "Current stage and owner per topic (FR-25, §4.10 model A)."),
@@ -62,7 +65,19 @@ PURPOSE = {
     "internal_signals": ("Collaboration", "Customer conversations, RFP themes and lost deals — inert until moderated (FR-24, §2.5)."),
 }
 GROUP_ORDER = ["Core", "Discovery", "Business graph", "Qualification",
-               "Competitor intel", "Output", "Collaboration", "Other"]
+               "Competitor intel", "Output", "Planner", "Collaboration", "Other"]
+
+#: (table, column) -> why it was added. The list itself is read from
+#: `db.MIGRATIONS`, so a migration cannot be applied without appearing here.
+MIGRATION_REASON = {
+    ("topic_briefs", "brief_schema"):
+        "Distinguishing an INCOMPLETE brief (missing a section that current briefs carry) from a merely STALE one.",
+    ("plans", "pdf_path"): "Where the exported plan document was written.",
+    ("plans", "pdf_bytes"): "Size, so the interface can show it without opening the file.",
+    ("plans", "pdf_hash"): "Content hash — cache-busts the embedded viewer when a plan is re-exported.",
+    ("plans", "pdf_generated_at"): "When the export was rendered.",
+    ("plans", "pdf_schema"): "Which renderer version produced it, so an old export can be recognised as stale.",
+}
 
 
 def routes() -> list[tuple[str, str, str]]:
@@ -154,9 +169,15 @@ def write_data_model() -> None:
         tables += [f"\n### {group}\n", "| Table | Rows | Purpose |", "|---|---:|---|"]
         tables += [f"| `{t}` | {counts[t]:,} | {d} |" for t, d in by_group[group]]
 
+    from radar.db import MIGRATIONS
+    migrations = ["| Table | Column | Added for |", "|---|---|---|"]
+    migrations += [f"| `{t}` | `{c}` | {MIGRATION_REASON.get((t, c), '')} |"
+                   for t, c, _ in MIGRATIONS]
+
     template = (HERE / "_build" / "data_model_template.md").read_text()
     (HERE / "DATA_MODEL.md").write_text(
         template.replace("{{TABLE_COUNT}}", str(len(counts)))
+                .replace("{{MIGRATIONS}}", "\n".join(migrations))
                 .replace("{{TABLES}}", "\n".join(tables)))
     print(f"  DATA_MODEL.md     {len(counts)} tables")
 

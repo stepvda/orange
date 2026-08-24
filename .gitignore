@@ -3,14 +3,24 @@
 *.key
 
 # Data & artefacts
-data/
-data/radar.db
+# `data/` on its own would stop git descending into the directory at all, so the
+# negation below could never take effect — hence `data/*`.
+data/*
 !data/.gitkeep
-*.db
 *.sqlite3
 *.duckdb
 archive/
 .cache/
+
+# The radar database is NOT committed: at 121 MB it exceeds GitHub's hard 100 MB
+# per-file limit, so a push carrying it is rejected outright. It is also rebuilt
+# by every pipeline run, and the deployed instance is seeded from the package the
+# deploy script builds (scripts/deploy-azure.sh), not from the repository.
+#
+# The rows that genuinely cannot be regenerated — feedback, assessments, stage
+# moves — are the reason the negation used to be here. They still need a home:
+# a small, diffable export of those tables, not a 121 MB binary blob.
+*.db
 
 # Python
 __pycache__/

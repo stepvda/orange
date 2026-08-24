@@ -498,6 +498,70 @@ CREATE TABLE IF NOT EXISTS internal_signals (
 -- DR-08 applies exactly as it does to signals: URL plus a bounded extract,
 -- never a mirror of the page.
 -- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- Planner (strategy engine).
+--
+-- A PLAN is a selection of opportunity spaces, an entry year for each, and a
+-- five-year revenue and profit projection under a stated set of assumptions.
+-- Three things are kept apart in the schema because they are different kinds of
+-- claim, exactly as elsewhere in this codebase:
+--
+--   inputs      what the caller asked for. Reproducible: the same inputs and
+--               the same versions give the same plan, and a test asserts it.
+--   projection  arithmetic over stored sizes and configured bands. No model.
+--   narrative   a model writing prose ABOUT the projection. Absent until asked
+--               for, and it may not introduce a number.
+--
+-- Every plan records economics_version, sizing_version and weight_set. A plan
+-- built under different assumptions is not comparable with another, and the
+-- interface will not chart them together silently.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS plans (
+    id              TEXT PRIMARY KEY,          -- PLAN-xxxxxxxx
+    created_at      TEXT NOT NULL,
+    label           TEXT,
+    inputs          TEXT NOT NULL,             -- JSON: the full parameter set
+    status          TEXT NOT NULL,             -- draft | computed | narrated
+    objective       TEXT NOT NULL,
+    plan_years      INTEGER NOT NULL,
+    selected_count  INTEGER NOT NULL DEFAULT 0,
+    considered_count INTEGER NOT NULL DEFAULT 0,
+    projection      TEXT NOT NULL DEFAULT '{}',-- JSON: per-year revenue/profit, bands, mix
+    capacity_usage  TEXT NOT NULL DEFAULT '{}',-- JSON: per pool per year, and what bound
+    exclusions      TEXT NOT NULL DEFAULT '[]',-- JSON: why each near-miss was left out
+    flags           TEXT NOT NULL DEFAULT '[]',-- JSON: plausibility and concentration warnings
+    narrative       TEXT,                      -- JSON {section: text} or NULL
+    stripped        TEXT NOT NULL DEFAULT '[]',
+    economics_version TEXT NOT NULL,
+    sizing_version  TEXT,
+    weight_set      TEXT,
+    prompt_version  TEXT,
+    model_version   TEXT,
+    pipeline_version TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plans_created ON plans(created_at);
+
+-- One row per space selected into a plan, with its entry year and the economics
+-- that were applied to it. Denormalised on purpose: a plan has to stay
+-- reproducible after the topic beneath it has moved on.
+CREATE TABLE IF NOT EXISTS plan_selections (
+    plan_id         TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    opportunity_id  TEXT NOT NULL REFERENCES opportunity_spaces(id) ON DELETE CASCADE,
+    entry_year      INTEGER NOT NULL,          -- 1-based, within the plan window
+    horizon         TEXT,
+    portfolio_distance INTEGER,
+    margin_applied  REAL NOT NULL,
+    entry_effort    REAL NOT NULL,             -- person-years, after any shared-build discount
+    pool            TEXT,                      -- capability pool it draws on
+    som_base        REAL,
+    revenue_by_year TEXT NOT NULL DEFAULT '[]',-- JSON, after overlap adjustment
+    profit_by_year  TEXT NOT NULL DEFAULT '[]',
+    overlap_factor  REAL NOT NULL DEFAULT 1.0,
+    rationale       TEXT,                      -- why it was selected, computed not written
+    PRIMARY KEY (plan_id, opportunity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_plansel_topic ON plan_selections(opportunity_id);
+
 CREATE TABLE IF NOT EXISTS competitor_pages (
     id              TEXT PRIMARY KEY,          -- sha256 of competitor_id + url
     competitor_id   TEXT NOT NULL,             -- register id; not an FK, the register is config
@@ -566,6 +630,14 @@ CREATE TABLE IF NOT EXISTS topic_competitor_analysis (
 MIGRATIONS: list[tuple[str, str, str]] = [
     # (table, column, DDL fragment)
     ("topic_briefs", "brief_schema", "TEXT"),
+    # The Planner's exported PDF. Kept on the plan row rather than in its own
+    # table because a plan is immutable once computed — its id is a fingerprint
+    # of its inputs — so there is only ever one report per plan.
+    ("plans", "pdf_path", "TEXT"),
+    ("plans", "pdf_bytes", "INTEGER"),
+    ("plans", "pdf_hash", "TEXT"),
+    ("plans", "pdf_generated_at", "TEXT"),
+    ("plans", "pdf_schema", "TEXT"),
 ]
 
 

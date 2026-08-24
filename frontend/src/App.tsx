@@ -8,6 +8,7 @@ import { BarList, ChartCard, DivergenceChart, Heatmap, Kpi, StackedBar, StageFun
 import { HelpButton, HelpModal } from './components/Help'
 import GenerateScreen from './components/Generate'
 import SpaceFullscreen from './components/Fullscreen'
+import PlannerScreen from './components/Planner'
 import ScoreExplainModal from './components/ScoreExplain'
 import { formatEur } from './components/MarketSize'
 import { api } from './api'
@@ -89,6 +90,7 @@ function initialFromUrl() {
     // ?view=full rides along with ?topic, so "read this one properly" is as
     // shareable as the topic itself.
     fullscreen: params.get('view') === 'full',
+    planner: params.get('view') === 'planner',
     sort: (params.get('sort') ?? 'rank') as SortId,
     filters,
     theme: (theme === 'dark' || theme === 'light' ? theme : 'auto') as 'auto' | 'light' | 'dark',
@@ -155,6 +157,9 @@ export default function App() {
   // TAB, which is the responsive fallback below 1080px and still sits inside
   // the layout: this replaces the layout, and it carries the brief with it.
   const [fullscreen, setFullscreen] = useState(initial.fullscreen)
+  // The Planner is a screen, not a tab: it is a statement about the portfolio
+  // rather than about any one space, so it takes the whole window.
+  const [planner, setPlanner] = useState(initial.planner)
   const [whitespace, setWhitespace] = useState<Topic[]>([])
   const [whitespaceTotal, setWhitespaceTotal] = useState(0)
   const [coverage, setCoverage] = useState<Coverage | null>(null)
@@ -278,7 +283,9 @@ export default function App() {
     role === 'strategist' ? params.delete('role') : params.set('role', role)
     tab === 'radar' ? params.delete('tab') : params.set('tab', tab)
     generating ? params.set('screen', 'generate') : params.delete('screen')
-    fullscreen && selected ? params.set('view', 'full') : params.delete('view')
+    if (planner) params.set('view', 'planner')
+    else if (fullscreen && selected) params.set('view', 'full')
+    else params.delete('view')
     theme === 'auto' ? params.delete('theme') : params.set('theme', theme)
     sort === 'rank' ? params.delete('sort') : params.set('sort', sort)
     for (const key of FILTER_KEYS) {
@@ -288,7 +295,7 @@ export default function App() {
     filters.has_brief ? params.set('has_brief', '1') : params.delete('has_brief')
     const query = params.toString()
     window.history.replaceState(null, '', query ? `?${query}` : window.location.pathname)
-  }, [selected, role, tab, theme, sort, filters, generating, fullscreen])
+  }, [selected, role, tab, theme, sort, filters, generating, fullscreen, planner])
 
   useEffect(() => {
     api.meta().then(setMeta).catch((e) => setError(String(e)))
@@ -460,8 +467,14 @@ export default function App() {
                 onClick={() => setHelp('weight_set')}>
           {meta.weight_set}
         </button>
+        <button className="planner-btn"
+                onClick={() => { setPlanner(true); setGenerating(false); setFullscreen(false) }}
+                aria-pressed={planner}
+                title="Build a five-year portfolio plan: which spaces to enter, in what order, and what they earn">
+          Planner
+        </button>
         <button className="generate-btn"
-                onClick={() => { setGenerating(true); setFullscreen(false) }}
+                onClick={() => { setGenerating(true); setFullscreen(false); setPlanner(false) }}
                 aria-pressed={generating}
                 title="Synthesise more opportunity spaces from the evidence already collected">
           Generate
@@ -488,6 +501,12 @@ export default function App() {
         />
       )}
 
+      {planner && (
+        <PlannerScreen
+          onClose={() => setPlanner(false)}
+          onOpenTopic={(id) => { setPlanner(false); setSelected(id); setTab('list') }} />
+      )}
+
       {fullscreen && selected && (
         <SpaceFullscreen
           topicId={selected}
@@ -508,7 +527,8 @@ export default function App() {
           }} />
       )}
 
-      <div className="layout" ref={layoutRef} hidden={generating || (fullscreen && Boolean(selected))}
+      <div className="layout" ref={layoutRef}
+           hidden={generating || planner || (fullscreen && Boolean(selected))}
            data-detail={detailHidden ? 'hidden' : undefined}
            style={{
              ['--filters-w' as any]: `${layout.filtersCollapsed ? FILTERS_COLLAPSED : FILTERS_WIDTH}px`,

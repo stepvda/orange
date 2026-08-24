@@ -799,3 +799,139 @@ def format_topic_for_competitor_analysis(topic: dict[str, Any], labels: dict[str
         if entry.get("named_offers"):
             lines.append(f"  Their named offers: {', '.join(entry['named_offers'][:8])}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# The Planner narrative
+# ---------------------------------------------------------------------------
+
+PROMPT_VERSION_PLAN = "plan-v1"
+
+PLAN_SECTIONS = {
+    "thesis": "The investment thesis in three or four sentences. What is the coherent bet "
+              "this portfolio makes, and why now? Not a list of the spaces — the argument that "
+              "connects them.",
+    "why_these": "Why this set rather than the obvious alternatives. Refer to the selection "
+                 "criteria that actually bound: capability capacity, entry slots, concentration "
+                 "limits, evidence confidence.",
+    "sequence": "The entry sequence and what it buys. Which spaces start first, what they "
+                "establish for the ones that follow, and why the later cohorts wait.",
+    "capacity": "The execution story. Which capability pools this plan commits, where it runs "
+                "hot, and what that means for hiring or partnering.",
+    "risks": "The three or four things most likely to make this plan wrong, stated plainly. "
+             "Include the ones the computed flags raise.",
+    "not_doing": "What was deliberately left out and why. Name the constraint, not a preference.",
+}
+
+
+def plan_system_prompt(cfg: Config) -> str:
+    """Write the business plan for a computed portfolio.
+
+    Every figure on the page was computed before this prompt ran. The model's
+    job is to explain a plan, not to produce one — so the numeric guard is
+    absolute here, more than anywhere else in the product: a plan that contradicts
+    its own projection table is worse than a plan with no prose at all.
+    """
+    sections = "\n".join(f"  - {name}: {guide}" for name, guide in PLAN_SECTIONS.items())
+    return f"""{orange_context_block(cfg)}
+
+YOUR TASK
+Write the narrative of a five-year business plan for Orange Business. The
+portfolio has ALREADY BEEN SELECTED and the projection ALREADY COMPUTED by an
+optimiser. You are explaining a decision, not making one.
+
+The audience is an Orange Business executive committee. They will ask where every
+number came from, and the answer has to be "the model computed it", never "the
+plan asserts it".
+
+SECTIONS
+{sections}
+
+ABSOLUTE RULES — a violation drops the section
+1. NO NUMBERS. Not one. No euro figure, no percentage, no headcount, no year-on-year
+   change — not even one that appears in the supplied data. Every figure is already
+   in the projection table beside your prose, and a sentence of yours that disagrees
+   with it is a defect the reader has to adjudicate. Refer to magnitudes in words:
+   "the largest single contributor", "roughly a third of the portfolio", "the pool
+   that runs hottest".
+2. ONLY THE SUPPLIED SPACES. Name opportunity spaces only from the selected list,
+   by their statement or their id. Do not invent a space, and do not name one that
+   was excluded as though it were in.
+3. ONLY SUPPLIED ORANGE ASSETS. Offers, certifications, partners and capability
+   pools only as supplied. Never a customer name.
+4. THE CONSTRAINTS ARE THE ARGUMENT. This plan is shaped by what bound it —
+   capability capacity, entry slots, concentration caps. Say so. A plan that reads
+   as though everything desirable was chosen is not describing an optimiser's output.
+5. CONCEDE THE UNCERTAINTY. The projection rests on declared assumption bands and
+   on obtainable-share figures that are planning assumptions rather than forecasts.
+   The `risks` section must say this in plain words.
+6. NO SUPERLATIVES about Orange. A named capability is an argument; "world-leading"
+   is not.
+
+OUTPUT — a single JSON object:
+{{
+  "sections": {{ "<section name>": "<prose, 3-6 sentences>" }},
+  "headline": "<one sentence a CEO could repeat, no numbers>",
+  "spaces_named": ["<every opportunity space id you referred to>"]
+}}
+
+`spaces_named` is validated against the selected list."""
+
+
+def format_plan_for_narrative(plan: dict[str, Any]) -> str:
+    """The computed plan, as the evidence block for its own narrative."""
+    proj = plan.get("projection") or {}
+    mix = proj.get("mix") or {}
+    lines = [
+        f"PLAN {plan['id']} — {plan.get('label')}",
+        f"Objective: {plan.get('objective')} over {plan.get('plan_years')} years",
+        f"Selected {plan.get('selected_count')} spaces from {plan.get('considered_count')} admissible candidates.",
+        "",
+        "PORTFOLIO SHAPE (shares, for your qualitative description only)",
+    ]
+    for key in ("vertical", "horizon", "distance"):
+        entries = mix.get(key) or []
+        if entries:
+            lines.append(f"  by {key}: " + ", ".join(
+                f"{e['key']} {e['share']:.0%}" for e in entries[:6]))
+
+    lines += ["", "ENTRY SEQUENCE"]
+    by_year: dict[int, list[dict]] = {}
+    for s in plan.get("selections", []):
+        by_year.setdefault(s["entry_year"], []).append(s)
+    for year in sorted(by_year):
+        lines.append(f"  YEAR {year} — {len(by_year[year])} space(s) enter:")
+        for s in by_year[year][:8]:
+            lines.append(f"    [{s['opportunity_id']}] {s['statement'][:110]}")
+            lines.append(f"       {s['vertical']} · L{s['portfolio_distance']} · "
+                         f"{s['horizon']} · pool: {s.get('pool') or 'unassigned'}")
+
+    cap = plan.get("capacity_usage") or {}
+    lines += ["", "CAPABILITY POOLS COMMITTED (utilisation as a share, for description)"]
+    for pool, data in (cap.get("pools") or {}).items():
+        util = data.get("peak_utilisation")
+        if util:
+            lines.append(f"  {pool}: peaks at {util:.0%} of the share available for new work")
+    if cap.get("binding"):
+        lines += ["", "WHAT BOUND THIS PLAN — the constraints that were hit:"]
+        lines += [f"  - {b}" for b in cap["binding"]]
+
+    if plan.get("flags"):
+        lines += ["", "COMPUTED WARNINGS — these must be reflected in `risks`:"]
+        for f in plan["flags"]:
+            lines.append(f"  - [{f['severity']}] {f['message']}")
+
+    exc = plan.get("exclusions") or []
+    if exc:
+        lines += ["", "NOTABLE EXCLUSIONS — for the `not_doing` section:"]
+        for e in exc[:8]:
+            lines.append(f"  [{e['opportunity_id']}] {e['statement'][:90]} — {e['reason']}")
+
+    a = plan.get("assumptions") or {}
+    lines += ["", "ASSUMPTIONS THIS PLAN RESTS ON (describe qualitatively, quote no figures):",
+              "  Margin varies by portfolio distance, anchored on Orange's filed segment margin.",
+              "  Revenue ramps from each space's own entry year, by time horizon.",
+              "  Obtainable share is a planning assumption, discounted where selected spaces",
+              "  compete for the same buying centre.",
+              f"  Economics version: {a.get('economics_version')} · owner: {a.get('owner')}"]
+    return "\n".join(lines)

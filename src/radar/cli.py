@@ -130,6 +130,31 @@ def main(argv: list[str] | None = None) -> int:
     competition = sub.add_parser("competition", help="Assess competitive intensity (§4.3.3)")
     competition.add_argument("--topics", default=None, help="Comma-separated topic ids")
 
+    plan = sub.add_parser("plan", help="Build a five-year portfolio plan (the Planner)")
+    plan.add_argument("--label", default="Untitled plan")
+    plan.add_argument("--objective", default="profit",
+                      choices=["profit", "revenue", "npv", "strategic_coverage"])
+    plan.add_argument("--years", type=int, default=5)
+    plan.add_argument("--budget", type=float, default=None, help="Total entry effort, person-years")
+    plan.add_argument("--slots", type=int, default=None, help="New spaces started per year")
+    plan.add_argument("--availability", type=float, default=None,
+                      help="Share of capability-pool headcount free for new work (0-1)")
+    plan.add_argument("--min-confidence", default="partial",
+                      choices=["observed", "partial", "modelled"])
+    plan.add_argument("--max-distance", type=int, default=3)
+    plan.add_argument("--prefer-verticals", default=None, help="Comma-separated")
+    plan.add_argument("--exclude-verticals", default=None, help="Comma-separated")
+    plan.add_argument("--geographies", default=None, help="Comma-separated ISO codes")
+    plan.add_argument("--narrate", action="store_true", help="Also write the business plan")
+    plan.add_argument("--pdf", action="store_true",
+                      help="Also export the whole plan as a PDF (inputs, projection, spaces, "
+                           "business plan, assumptions)")
+    plan.add_argument("--json", action="store_true")
+    plan.add_argument("--provider", default=None)
+
+    plans = sub.add_parser("plans", help="List stored plans")
+    plans.add_argument("--limit", type=int, default=20)
+
     cscrape = sub.add_parser("competitor-scrape",
                              help="Crawl competitor sites into the profiling corpus (robots-aware)")
     cscrape.add_argument("--competitors", default=None, help="Comma-separated register ids")
@@ -317,6 +342,69 @@ def main(argv: list[str] | None = None) -> int:
             topic_ids=[t.strip() for t in args.topics.split(",")] if args.topics else None
         )
         print(json.dumps(stats, indent=2))
+        return 0
+
+    if args.command == "plans":
+        from .planner import list_plans
+        for row in list_plans(db, args.limit):
+            pr = row["projection"] or {}
+            print(f"{row['id']}  {row['created_at'][:16]}  {row['selected_count']:>3} spaces  "
+                  f"profit EUR{(pr.get('profit_total') or 0)/1e6:>8,.0f}m  {row['label']}")
+        return 0
+
+    if args.command == "plan":
+        if getattr(args, "provider", None):
+            import os
+            os.environ["RADAR_LLM_PROVIDER"] = args.provider
+        from .planner import Planner, PlanInputs
+
+        def split(v):
+            return tuple(x.strip() for x in v.split(",")) if v else ()
+
+        inputs = PlanInputs(
+            label=args.label, objective=args.objective, plan_years=args.years,
+            budget_person_years=args.budget, entry_slots_per_year=args.slots,
+            pool_availability=args.availability, min_confidence=args.min_confidence,
+            max_portfolio_distance=args.max_distance,
+            prefer_verticals=split(args.prefer_verticals),
+            exclude_verticals=split(args.exclude_verticals),
+            geographies=split(args.geographies),
+        )
+        planner = Planner(cfg, db)
+        result = planner.plan(inputs)
+        if args.narrate:
+            result = planner.narrate(result["id"])
+        report = None
+        if args.pdf:
+            from .plan_report import PlanReportBuilder
+            # After the narrative, never before: the document is a snapshot, and
+            # one taken first would be missing the business plan.
+            report = PlanReportBuilder(cfg, db).build(planner.get(result["id"]))
+            result["report"] = report
+        if args.json:
+            print(json.dumps(result, indent=2, default=str))
+            return 0
+        pr = result["projection"]
+        print(f"\n{result['id']}  —  {result['label']}")
+        print(f"{result['selected_count']} spaces selected from {result['considered_count']} candidates\n")
+        print(f"{'year':>6}{'revenue':>14}{'profit':>12}")
+        for i, (rev, prof) in enumerate(zip(pr["revenue_by_year"], pr["profit_by_year"]), 1):
+            print(f"{i:>6}{rev/1e6:>13,.1f}m{prof/1e6:>11,.1f}m")
+        print(f"{'total':>6}{pr['revenue_total']/1e6:>13,.1f}m{pr['profit_total']/1e6:>11,.1f}m")
+        print(f"\nprofit band  EUR{pr['profit_total_low']/1e6:,.0f}m - EUR{pr['profit_total_high']/1e6:,.0f}m")
+        print(f"NPV @ {pr['discount_rate']:.1%}  EUR{pr['npv_profit']/1e6:,.0f}m")
+        print(f"year-{pr['years']} revenue is {pr['year5_share_of_segment']:.1%} of the filed segment")
+        binding = (result.get("capacity_usage") or {}).get("binding") or []
+        if binding:
+            print("\nwhat bound this plan:")
+            for b in binding:
+                print(f"  - {b}")
+        for f in result.get("flags") or []:
+            print(f"\n[{f['severity'].upper()}] {f['message']}")
+        if result.get("narrative"):
+            print(f"\n{result['narrative'].get('headline','')}")
+        if report:
+            print(f"\nPDF  {report['path']}  ({report['bytes']:,} bytes)")
         return 0
 
     if args.command == "competitor-scrape":

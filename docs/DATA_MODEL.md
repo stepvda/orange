@@ -1,6 +1,6 @@
 # Data model reference
 
-25 tables in one SQLite file. This is the physical reference; the
+27 tables in one SQLite file. This is the physical reference; the
 diagrams in the Technical Architecture (Figures 7–10 and 12) show the same thing
 with its relationships.
 
@@ -32,6 +32,11 @@ not simply recreated.
 | Table | Column | Added for |
 |---|---|---|
 | `topic_briefs` | `brief_schema` | Distinguishing an INCOMPLETE brief (missing a section that current briefs carry) from a merely STALE one. |
+| `plans` | `pdf_path` | Where the exported plan document was written. |
+| `plans` | `pdf_bytes` | Size, so the interface can show it without opening the file. |
+| `plans` | `pdf_hash` | Content hash — cache-busts the embedded viewer when a plan is re-exported. |
+| `plans` | `pdf_generated_at` | When the export was rendered. |
+| `plans` | `pdf_schema` | Which renderer version produced it, so an old export can be recognised as stale. |
 
 ## Tables
 
@@ -65,7 +70,7 @@ not simply recreated.
 
 | Table | Rows | Purpose |
 |---|---:|---|
-| `market_sizes` | 313 | TAM/SAM/SOM by method, every factor with its source and basis, plus caveats (§4.3.4). |
+| `market_sizes` | 701 | TAM/SAM/SOM by method, every factor with its source and basis, plus caveats (§4.3.4). |
 | `reference_observations` | 56,385 | Statistical values by indicator, industry, geography, size class and period. Denominators, not signals. |
 | `reference_series` | 5 | Eurostat dataset metadata including the publisher's own updated stamp and licence. |
 | `topic_competition` | 181 | Competitive intensity level over a named competitor list, with the evidence for each (§4.3.3). |
@@ -84,6 +89,13 @@ not simply recreated.
 |---|---:|---|
 | `topic_briefs` | 174 | Generated PDF metadata, stamped with every version it printed — including `brief_schema` (FR-18). |
 | `topic_descriptions` | 174 | Long-form narrative, each section carrying the signal ids it was written from (FR-14). |
+
+### Planner
+
+| Table | Rows | Purpose |
+|---|---:|---|
+| `plan_selections` | 190 | One row per selected space per plan: entry year, the margin band applied, the overlap discount and the capability pool it draws on. |
+| `plans` | 4 | One portfolio plan: the stated inputs, the projection, the flags and the narrative. The id is a fingerprint of the inputs, so a plan is immutable once computed. |
 
 ### Collaboration
 

@@ -1,5 +1,6 @@
 import type {
   BriefMeta, Competition, CompetitorAnalysis, Coverage, FilterState, GenerationConstraints, GenerationJob,
+  Plan, PlannerMeta, PlanRequest, PlanReport, PlanReportStatus,
   GenerationMatch, GenerationOptions, MarketSize, Meta, RadarView, Topic, TopicDescription,
 } from './types'
 
@@ -95,6 +96,28 @@ export const api = {
   competitorAnalysis: (id: string) => get<CompetitorAnalysis>(`/topics/${id}/competitor-analysis`),
 
   recomputeCompetition: (id: string) => post<Competition>(`/topics/${id}/competition`),
+
+  /** The Planner. Selection and projection are arithmetic and fast; only the
+   *  written business plan costs a model call. */
+  plannerMeta: () => get<PlannerMeta>('/planner/meta'),
+  plans: () => get<{ plans: any[] }>('/planner/plans'),
+  plan: (id: string) => get<Plan>(`/planner/plans/${id}`),
+  createPlan: (body: PlanRequest) => post<Plan>('/planner/plans', body),
+  narratePlan: (id: string) => post<Plan>(`/planner/plans/${id}/narrative`),
+
+  planReportStatus: (id: string) => get<PlanReportStatus>(`/planner/plans/${id}/report`),
+
+  /** Renders the document. Always a rebuild, because the narrative can be
+      written after the plan was computed and a cached export would be missing
+      exactly the section the reader opened it for. */
+  buildPlanReport: (id: string) => post<PlanReport>(`/planner/plans/${id}/report`),
+
+  /** Cache-busted on the content hash so a rebuilt document is never served
+      from the embed's cache at the same URL. */
+  planReportUrl: (id: string, version?: string) =>
+    `${BASE}/planner/plans/${id}/report.pdf${version ? `?v=${encodeURIComponent(version)}` : ''}`,
+
+  planReportDownloadUrl: (id: string) => `${BASE}/planner/plans/${id}/report.pdf?download=1`,
 
   generateCompetitorAnalysis: (id: string, force = false) =>
     post<CompetitorAnalysis>(`/topics/${id}/competitor-analysis${force ? '?force=true' : ''}`),

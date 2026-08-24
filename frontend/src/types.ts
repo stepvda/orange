@@ -523,3 +523,128 @@ export interface GenerationJob {
   log: { at: string; message: string }[]
   stats: Record<string, any>
 }
+
+
+/** The Planner (strategy engine). Three registers kept apart, as everywhere else:
+ *  `inputs` is what was asked for, `projection` is arithmetic, `narrative` is a
+ *  model explaining the arithmetic and is absent until requested. */
+export interface PlanRequest {
+  label: string
+  objective: string
+  plan_years: number
+  budget_person_years?: number | null
+  entry_slots_per_year?: number | null
+  pool_availability?: number | null
+  min_confidence: string
+  max_portfolio_distance: number
+  geographies?: string[]
+  exclude_verticals?: string[]
+  exclude_technologies?: string[]
+  prefer_verticals?: string[]
+  prefer_domains?: string[]
+  max_share_per_vertical?: number | null
+  max_share_per_technology?: number | null
+  max_competition?: string | null
+}
+
+export interface PlanSelection {
+  opportunity_id: string
+  statement: string
+  vertical: string
+  use_case: string
+  technology: string
+  entry_year: number
+  horizon: string | null
+  portfolio_distance: number
+  margin_applied: number
+  entry_effort: number
+  pool: string | null
+  som_base: number
+  revenue_by_year: number[]
+  profit_by_year: number[]
+  overlap_factor: number
+  rationale: string
+}
+
+export interface PlanProjection {
+  years: number
+  revenue_by_year: number[]
+  profit_by_year: number[]
+  profit_low_by_year: number[]
+  profit_high_by_year: number[]
+  revenue_total: number
+  profit_total: number
+  profit_total_low: number
+  profit_total_high: number
+  npv_profit: number
+  discount_rate: number
+  year5_share_of_segment: number | null
+  segment_revenue: number
+  mix: Record<string, { key: string; count: number; share: number }[]>
+}
+
+export interface Plan {
+  id: string
+  created_at: string
+  label: string
+  status: string
+  objective: string
+  plan_years: number
+  selected_count: number
+  considered_count: number
+  inputs: Record<string, any>
+  projection: PlanProjection
+  capacity_usage: {
+    pools?: Record<string, { capacity: number; used_by_year: number[]; peak_utilisation: number | null }>
+    slots?: Record<string, { used: number; available: number }>
+    binding?: string[]
+  }
+  exclusions: { opportunity_id: string; statement: string; vertical: string; reason: string }[]
+  flags: { kind: string; severity: string; message: string }[]
+  selections: PlanSelection[]
+  narrative: { headline: string; sections: Record<string, string> } | null
+  stripped: { section: string; reason: string }[]
+  assumptions?: Record<string, any>
+  economics_version: string
+  sizing_version?: string | null
+  weight_set?: string | null
+  prompt_version?: string | null
+  model_version?: string | null
+}
+
+export interface PlannerMeta {
+  economics_version: string
+  owner: string
+  source_filing: string
+  filed: Record<string, number>
+  defaults: Record<string, any>
+  margin_by_distance: Record<string, number>
+  ramp_by_horizon: Record<string, number[]>
+  capacity: Record<string, any>
+  aggregation: Record<string, any>
+  pools: { label: string; headcount: number }[]
+  plannable_spaces: number
+  sizes_by_confidence: Record<string, number>
+  verticals: { id: string; label: string }[]
+  domains: { id: string; label: string }[]
+}
+
+export interface PlanReport {
+  plan_id: string
+  filename: string
+  bytes: number
+  content_hash: string
+  generated_at: string
+  schema: string
+  exists: boolean
+  stale: boolean
+  has_narrative: boolean
+  url: string
+}
+
+export interface PlanReportStatus {
+  plan_id: string
+  generated: boolean
+  report: PlanReport | null
+  narrative_available: boolean
+}

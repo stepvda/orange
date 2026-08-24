@@ -19,3 +19,4 @@ plotly>=5.20
 
 # Dev
 pytest>=8.0
+pymupdf>=1.24        # reads generated PDFs back in tests
