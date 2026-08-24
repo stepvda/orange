@@ -767,3 +767,53 @@ def test_every_layer_of_a_deep_diagram_survives(cfg, db, tmp_path):
     for label in ("Business outcomes", "Application layer", "Semantic layer",
                   "Data integration", "Physical layer"):
         assert label.upper() in text.upper(), f"{label} was dropped from the diagram"
+
+
+def test_no_text_box_anywhere_overflows_its_own_height(cfg, db, tmp_path):
+    """The general form of the overlap bug, not just the bullet case.
+
+    Fixing the bullets left chart labels broken, because a label has no room to
+    grow into: it sits under a bar in a slot the geometry fixed. The model
+    supplies a paragraph where the prompt asked for a name — a driver called
+    "Pricing is tied to achieving specific outcomes, such as regulatory
+    compliance for a defined product portfolio…" is one this actually produced —
+    and it wrapped out of its box, over the legend and off the slide.
+
+    So this walks EVERY text frame on every slide rather than the bullet column,
+    which is what should have been asserted the first time.
+    """
+    import math
+
+    from pptx import Presentation
+
+    seed(db)
+    _seed_deep_diagram(db)
+
+    class _Verbose(_VerboseLLM):
+        def complete_json(self, system, user, **kwargs):
+            payload = super().complete_json(system, user, **kwargs)
+            payload["components"] = [
+                {"label": "A very long component name that keeps going and going",
+                 "provider": "third_party", "note": "to be sourced eventually and then some"}
+                for _ in range(12)]
+            return payload
+
+    overflowing = []
+    for path in _decks(cfg, db, tmp_path, llm=_Verbose()):
+        for index, slide in enumerate(Presentation(str(path)).slides, 1):
+            for shape in slide.shapes:
+                if not (shape.has_text_frame and shape.text_frame.text.strip()):
+                    continue
+                if shape.top is None or shape.height is None:
+                    continue
+                runs = [r for p in shape.text_frame.paragraphs for r in p.runs]
+                points = next((r.font.size.pt for r in runs if r.font.size), 18)
+                per_line = max(1, int((shape.width / 914400 * 72) / (points * 0.5)))
+                lines = math.ceil(len(shape.text_frame.text) / per_line)
+                needed = lines * points / 72 * 914400
+                if needed > shape.height * 1.2:
+                    overflowing.append(
+                        f"{path.name} slide {index}: {points:.0f}pt text needs "
+                        f"{needed / 914400:.2f}in in a {shape.height / 914400:.2f}in box — "
+                        f"{shape.text_frame.text[:44]!r}")
+    assert not overflowing, "text will spill out of these boxes:\n  " + "\n  ".join(overflowing)

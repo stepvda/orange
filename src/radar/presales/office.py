@@ -140,6 +140,33 @@ def _text_width(text: str, size_pt: float, bold: bool = False) -> int:
     return int(len(text) * per_char * size_pt * 12700)
 
 
+def fit_label(text: str, width: Emu, size_pt: float, lines: int = 2,
+              bold: bool = False) -> str:
+    """A chart label trimmed to what its box can actually hold.
+
+    Bullets get more room when they need it; a chart label cannot. It sits under
+    a bar or beside a dot in a slot the geometry fixed, and the model routinely
+    supplies a paragraph where the prompt asked for a name — a driver called
+    "Pricing is tied to achieving specific outcomes, such as regulatory
+    compliance for a defined product portfolio…" is a real one this produced.
+    Left alone it wraps out of its box, over the legend and off the slide.
+
+    Truncating is the right answer HERE specifically, against the usual rule of
+    never clipping a label: an axis has no outside to move the text to, and the
+    full string is already on the slide as a bullet or in the speaker notes. A
+    trimmed label with an ellipsis says "there is more of this"; an untrimmed one
+    destroys the chart it was meant to annotate.
+    """
+    text = " ".join(str(text or "").split())
+    if not text:
+        return ""
+    per_char = 0.58 if bold else 0.52
+    budget = int((float(width) * lines) / (per_char * size_pt * 12700))
+    if len(text) <= budget:
+        return text
+    return text[: max(budget - 1, 1)].rstrip(" ,;:—-") + "…"
+
+
 # ---------------------------------------------------------------------------
 # Deck primitives
 # ---------------------------------------------------------------------------
@@ -318,7 +345,9 @@ def _box(slide, left, top, width, height, label: str, fill: RGBColor, text_colou
     paragraph = frame.paragraphs[0]
     paragraph.alignment = PP_ALIGN.CENTER
     run = paragraph.add_run()
-    run.text = label
+    # Two lines for the label, one for the note, both inside the box — a box
+    # whose text is taller than the box paints over the row beneath it.
+    run.text = fit_label(label, width, size, lines=2, bold=True)
     run.font.size = Pt(size)
     run.font.bold = True
     run.font.color.rgb = text_colour
@@ -327,7 +356,7 @@ def _box(slide, left, top, width, height, label: str, fill: RGBColor, text_colou
         second = frame.add_paragraph()
         second.alignment = PP_ALIGN.CENTER
         run = second.add_run()
-        run.text = note
+        run.text = fit_label(note, width, 8, lines=1)
         run.font.size = Pt(8)
         run.font.color.rgb = text_colour
         run.font.name = "Arial"
@@ -494,7 +523,8 @@ def waterfall(deck: Deck, slide, steps: Sequence[tuple[str, float, str]], top: E
         deck._text(slide, x - Inches(0.35), y0 - Inches(0.32), bar_w + Inches(0.7), Inches(0.3),
                    format_eur(abs(value)), size=11, bold=True, align=PP_ALIGN.CENTER)
         deck._text(slide, MARGIN + index * slot, top + plot_h + Inches(0.14), slot, Inches(0.55),
-                   label, size=10, colour=MUTED, align=PP_ALIGN.CENTER)
+                   fit_label(label, slot, 10, lines=2), size=10, colour=MUTED,
+                   align=PP_ALIGN.CENTER)
 
     _legend(deck, slide, MARGIN, top + height - Inches(0.15),
             [("value created", GAIN), ("cost to serve", COST), ("net", NEUTRAL)])
@@ -632,7 +662,9 @@ def layered_diagram(deck: Deck, slide, diagram: dict[str, Any], top: Emu) -> Non
         band.adjustments[0] = 0.05
         deck._text(slide, MARGIN + Inches(0.12), y + (layer_h - Inches(0.3)) // 2,
                    label_w - Inches(0.2), Inches(0.4),
-                   str(layer.get("label", "")).upper(), size=9, bold=True, colour=MUTED)
+                   fit_label(str(layer.get("label", "")).upper(), label_w - Inches(0.2), 9,
+                             lines=2, bold=True),
+                   size=9, bold=True, colour=MUTED)
 
         nodes = (layer.get("nodes") or [])[:4]
         if not nodes:
@@ -694,7 +726,8 @@ def option_columns(deck: Deck, slide, options: Sequence[dict[str, Any]], top: Em
                    bar_w + Inches(0.4), Inches(0.28), words[band], size=11, bold=True,
                    align=PP_ALIGN.CENTER)
         deck._text(slide, MARGIN + index * slot, top + plot_h + Inches(0.1), slot, Inches(0.5),
-                   str(option.get("model", "")), size=11, align=PP_ALIGN.CENTER, colour=MUTED)
+                   fit_label(option.get("model", ""), slot, 11, lines=2), size=11,
+                   align=PP_ALIGN.CENTER, colour=MUTED)
     deck._text(slide, MARGIN, top + height - Inches(0.15), BODY_W, Inches(0.3), measure,
                size=9, colour=MUTED)
 
