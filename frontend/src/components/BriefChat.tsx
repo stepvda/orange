@@ -620,6 +620,18 @@ export default function BriefChat({
                 : `Generate ${selected.length || ''} space${selected.length === 1 ? '' : 's'}`.trim()}
             </button>
           </div>
+          {/* The greyed button at the top is correct here and reads as a dead
+              end anyway: the action that works is inside the card below, and
+              somebody looking at a disabled Generate concludes the screen still
+              refuses them. Say where to go. */}
+          {briefs.some((b) => !b.runnable && b.hypothesis) && !canGenerate && (
+            <p className="gen-blocked">
+              <b>Generate is off because the corpus cannot evidence this — not because you cannot
+              build it.</b> Nobody has published about it yet, which is what makes it new. Use{' '}
+              <b>“Build it on what I know”</b> on the brief below: what you tell it is recorded as
+              dated, attributable evidence under your name, and the space is built on that.
+            </p>
+          )}
           <p className="gen-note">
             Each brief is a separate synthesis pass over the evidence it retrieves. What runs is the
             text in the box — the run embeds it, retrieves again, and every claim in the resulting

@@ -919,6 +919,11 @@ class PlanIn(BaseModel):
     label: str = "Untitled plan"
     objective: str = "profit"
     plan_years: int = 5
+    # Where the set comes from. `parameters` lets the optimiser choose under the
+    # constraints below; `workflow` takes what the stage gate already decided
+    # and ignores every constraint that would second-guess it.
+    source: str = "parameters"
+    from_stage: str = "demand_tested"
     budget_person_years: float | None = None
     entry_slots_per_year: int | None = None
     pool_availability: float | None = None
@@ -956,6 +961,7 @@ def planner_meta() -> dict[str, Any]:
         a = unjs(r["attributes"], {}) or {}
         pools.append({"label": r["label"], "headcount": a.get("headcount", 0)})
     return {
+        "workflow": _workflow_plannable(),
         "economics_version": econ.get("economics_version"),
         "owner": econ.get("owner"),
         "source_filing": econ.get("source_filing"),
@@ -973,6 +979,44 @@ def planner_meta() -> dict[str, Any]:
         "verticals": [{"id": v.id, "label": v.label} for v in _cfg.verticals],
         "domains": [{"id": d.id, "label": d.label} for d in _cfg.domains],
     }
+
+
+def _workflow_plannable() -> dict[str, Any]:
+    """What the stage gate has committed, and how much of it can be projected.
+
+    The count that matters to the form is not how many spaces reached a stage
+    but how many of those carry a bottom-up size — a committed space without one
+    contributes nothing to any figure, and a form that counted it would promise
+    a plan bigger than the one that comes back.
+    """
+    from .planner import WORKFLOW_STAGES, WORKFLOW_STAGE_LABELS
+
+    rows = _db.query("""
+        SELECT w.stage,
+               COUNT(*) n,
+               SUM(CASE WHEN EXISTS (SELECT 1 FROM market_sizes m
+                                     WHERE m.opportunity_id = o.id
+                                       AND m.method = 'bottom_up_adoption'
+                                       AND m.som_base > 0) THEN 1 ELSE 0 END) sized
+        FROM workflow_state w JOIN opportunity_spaces o ON o.id = w.opportunity_id
+        WHERE o.merged_into IS NULL GROUP BY 1""")
+    counts = {r["stage"]: {"count": r["n"], "sized": r["sized"] or 0} for r in rows}
+    stages = []
+    for i, stage in enumerate(WORKFLOW_STAGES):
+        here = counts.get(stage, {"count": 0, "sized": 0})
+        onward = [counts.get(s, {"count": 0, "sized": 0}) for s in WORKFLOW_STAGES[i:]]
+        stages.append({
+            "id": stage,
+            "label": WORKFLOW_STAGE_LABELS[stage],
+            "count": here["count"],
+            "sized": here["sized"],
+            # "or further" — what a plan starting at this stage would actually take.
+            "cumulative": sum(c["count"] for c in onward),
+            "cumulative_sized": sum(c["sized"] for c in onward),
+        })
+    return {"stages": stages,
+            "default_from_stage": "demand_tested",
+            "parked": sum(counts.get(s, {}).get("count", 0) for s in ("parked", "rejected"))}
 
 
 @app.get("/api/planner/plans")

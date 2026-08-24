@@ -32,6 +32,25 @@ THREE REGISTERS, KEPT APART, as everywhere else in this codebase:
   narrative   a model writing prose ABOUT the projection, under the numeric
               guard. It may not introduce a figure.
 
+TWO SOURCES FOR THE SET, and they are different questions.
+
+  parameters   The caller states constraints and the optimiser CHOOSES. This is
+               the exploratory register: what SHOULD we do, given a budget and a
+               capacity. Nothing has been decided yet.
+  workflow     The set is already decided. Every space the stage gate has moved
+               to Demand-tested or beyond is in, and the Planner does not get a
+               vote — a salesperson who confirmed customer demand outranks a
+               confidence floor, and an optimiser that dropped their space would
+               be overruling a human decision with an assumption band.
+
+That second mode is not a filtered version of the first. It answers "what does
+the business we have already committed to actually earn, and when" — so there is
+no objective to maximise and nothing is excluded for being outranked. What is
+left is SCHEDULING (horizon says when a space can start, entry slots say how
+many can start together) and arithmetic. Where the committed set exceeds what
+the pools can staff, that is REPORTED rather than resolved by dropping a space,
+because the overload is the finding.
+
 WHAT THIS IS NOT. It is not a forecast. Every projection carries its interval,
 its assumption versions and a plausibility check against Orange's own filed
 segment revenue — because the naive sum of obtainable market across all 418
@@ -58,6 +77,31 @@ PLAN_SCHEMA = "plan-1"
 DISTANCE_LABELS = {0: "L0", 1: "L1", 2: "L2", 3: "L3", 4: "L4"}
 HORIZON_EARLIEST = {"now": 1, "next": 2, "later": 3}
 
+SOURCES = ("parameters", "workflow")
+
+#: The stage gate, in order, so "Demand-tested or further" is a slice rather
+#: than a list somebody has to keep in step with `workflow.STAGES`.
+WORKFLOW_STAGES = ["shortlisted", "demand_tested", "packaged", "live"]
+WORKFLOW_STAGE_LABELS = {
+    "shortlisted": "Shortlisted",
+    "demand_tested": "Demand-tested",
+    "packaged": "Packaged",
+    "live": "Live",
+}
+
+#: A space already Packaged or Live is not waiting for the market. It has an
+#: offer, and in the Live case revenue — so its horizon, which describes when
+#: the market arrives, is answering a question that has already been answered
+#: for it. The stage pulls entry forward; it never pushes it back.
+STAGE_ENTRY_FLOOR = {"packaged": 1, "live": 1}
+
+
+def stages_from(stage: str) -> list[str]:
+    """`stage` and everything after it on the gate."""
+    if stage not in WORKFLOW_STAGES:
+        raise ValueError(f"Unknown workflow stage {stage!r}. Known: {WORKFLOW_STAGES}")
+    return WORKFLOW_STAGES[WORKFLOW_STAGES.index(stage):]
+
 
 # ---------------------------------------------------------------------------
 # Inputs
@@ -72,6 +116,12 @@ class PlanInputs:
     label: str = "Untitled plan"
     plan_years: int = 5
     objective: str = "profit"                 # profit | revenue | npv | strategic_coverage
+
+    # Where the SET comes from. `parameters` lets the optimiser choose under the
+    # constraints below; `workflow` takes what the stage gate has already
+    # decided and ignores every constraint that would second-guess it.
+    source: str = "parameters"                # parameters | workflow
+    from_stage: str = "demand_tested"         # only read when source == workflow
 
     # Hard constraints
     budget_person_years: float | None = None  # total entry effort available
@@ -126,6 +176,8 @@ class Candidate:
     domains: tuple[str, ...]
     horizon: str
     distance: int
+    stage: str | None
+    earliest_entry: int
     som_base: float
     som_low: float
     som_high: float
@@ -183,39 +235,235 @@ class Planner:
 
     # ------------------------------------------------------------------ run
     def plan(self, inputs: PlanInputs) -> dict[str, Any]:
+        if inputs.source not in SOURCES:
+            raise ValueError(f"Unknown plan source {inputs.source!r}. Known: {list(SOURCES)}")
+        if inputs.plan_years < 1:
+            raise ValueError("A plan needs a window of at least one year to project over.")
+        from_workflow = inputs.source == "workflow"
         candidates = self.candidates(inputs)
         if not candidates:
-            raise ValueError(
-                "No opportunity space survived the stated constraints. Loosen the "
-                "confidence floor, the distance cap or the exclusions."
-            )
-        selection, capacity, binding = self.select(candidates, inputs)
-        if not selection:
-            raise ValueError(
-                f"{len(candidates)} spaces were admissible but no set satisfied every constraint "
-                f"at once. " + ("; ".join(binding) if binding else "Loosen the concentration caps "
-                                "or the horizon mix.")
-            )
+            raise ValueError(self._nothing_to_plan(inputs))
+        if from_workflow:
+            selection, capacity, binding = self.schedule_workflow(candidates, inputs)
+        else:
+            selection, capacity, binding = self.select(candidates, inputs)
+            if not selection:
+                raise ValueError(
+                    f"{len(candidates)} spaces were admissible but no set satisfied every "
+                    f"constraint at once. "
+                    + ("; ".join(binding) if binding else "Loosen the concentration caps "
+                       "or the horizon mix.")
+                )
         projection, per_space, flags = self.project(selection, inputs)
+        if from_workflow:
+            flags = flags + self.commitment_flags(selection, capacity, inputs)
         exclusions = self.explain_exclusions(candidates, selection, inputs, binding)
         plan_id = f"PLAN-{inputs.fingerprint()}"
         self._store(plan_id, inputs, candidates, per_space, projection, capacity,
                     exclusions, flags)
         return self.get(plan_id) or {}
 
-    # ----------------------------------------------------------- candidates
-    def candidates(self, inputs: PlanInputs) -> list[Candidate]:
-        """Everything admissible under the hard constraints, resolved once."""
-        pools = self._pools()
-        margins = self.econ["margin_by_distance"]
-        ramps = self.econ["ramp_by_horizon"]
-        efforts = self.econ["capacity"]["entry_effort_person_years"]
-        conf_floor = CONFIDENCE_RANK.get(inputs.min_confidence, 1)
-        comp_cap = COMPETITION_RANK.get(inputs.max_competition or "high", 3)
+    def _nothing_to_plan(self, inputs: PlanInputs) -> str:
+        """Why the set is empty, in the terms of the source that produced it.
 
+        The two modes fail for unrelated reasons, and telling a user of the
+        workflow mode to loosen a confidence floor they never set would send
+        them to a control that is not on their screen.
+        """
+        if inputs.source != "workflow":
+            return ("No opportunity space survived the stated constraints. Loosen the "
+                    "confidence floor, the distance cap or the exclusions.")
+        label = WORKFLOW_STAGE_LABELS.get(inputs.from_stage, inputs.from_stage)
+        unsized = self.unsized_commitments(inputs)
+        if unsized:
+            return (f"{len(unsized)} space(s) have reached {label} but none of them has a "
+                    f"bottom-up market size, so there is nothing to project. Size them first — "
+                    f"the plan is arithmetic over those sizes.")
+        counts = self.stage_counts()
+        earlier = sum(n for stage, n in counts.items()
+                      if stage in WORKFLOW_STAGES
+                      and WORKFLOW_STAGES.index(stage) < WORKFLOW_STAGES.index(inputs.from_stage))
+        return (f"No opportunity space has reached {label}. "
+                + (f"{earlier} are still at an earlier stage — move one forward on the workflow "
+                   f"board, or plan from parameters instead."
+                   if earlier else
+                   "Nothing is on the workflow board yet, so plan from parameters instead."))
+
+    def stage_counts(self) -> dict[str, int]:
+        """How many spaces sit at each stage of the gate."""
         rows = self.db.query("""
+            SELECT w.stage, COUNT(*) n
+            FROM workflow_state w JOIN opportunity_spaces o ON o.id = w.opportunity_id
+            WHERE o.merged_into IS NULL GROUP BY 1""")
+        return {r["stage"]: r["n"] for r in rows}
+
+    def unsized_commitments(self, inputs: PlanInputs) -> list[dict[str, Any]]:
+        """Committed spaces the Planner cannot put a number on.
+
+        A space at Demand-tested with no bottom-up size is the one failure this
+        mode must not swallow. As far as the business is concerned it is IN the
+        plan; as far as every figure on the page is concerned it does not exist.
+        Left silent, the plan understates a portfolio the reader believes is
+        complete — so it is listed, and it is flagged.
+        """
+        wanted = stages_from(inputs.from_stage)
+        rows = self.db.query(f"""
+            SELECT o.id, o.statement, o.vertical, o.horizon, w.stage
+            FROM opportunity_spaces o
+            JOIN workflow_state w ON w.opportunity_id = o.id
+            WHERE o.merged_into IS NULL
+              AND w.stage IN ({",".join("?" * len(wanted))})
+              AND NOT EXISTS (SELECT 1 FROM market_sizes m
+                              WHERE m.opportunity_id = o.id
+                                AND m.method = 'bottom_up_adoption'
+                                AND m.som_base IS NOT NULL AND m.som_base > 0)
+            ORDER BY o.id""", tuple(wanted))
+        return [dict(r) for r in rows]
+
+    # -------------------------------------------------------- the committed set
+    def schedule_workflow(self, candidates: list[Candidate],
+                          inputs: PlanInputs) -> tuple[list[tuple[Candidate, int]], dict, list[str]]:
+        """Spread a committed set across the plan window. Nothing is dropped.
+
+        There is no selection here and no objective — the set arrived decided.
+        Two things fix when each space starts, in this order:
+
+          horizon   when the market arrives. `now` may start in year one,
+                    `later` not before year three. This is the same rule the
+                    optimiser obeys, and it is why a workflow plan is not simply
+                    everything entering at once.
+          slots     how many new spaces the organisation can start in one year
+                    at all. A horizon cohort larger than the year's slots
+                    cascades into the next year rather than pretending the
+                    capacity exists.
+
+        Where the cascade runs past the end of the window the space still
+        enters, in the final year, and the plan says the schedule is
+        over-subscribed. Quietly truncating a committed set is the one thing
+        this mode may not do — the overload is the finding, not a reason to
+        edit the portfolio.
+
+        Within a cohort the earlier slots go to the spaces worth the most over
+        the window, so an over-subscribed year defers the smallest commitments
+        rather than an arbitrary set.
+        """
+        years = inputs.plan_years
+        lim = self._limits(inputs)
+        slots = max(int(lim["slots"]), 1)
+        per_year: dict[int, int] = {t: 0 for t in range(1, years + 1)}
+        chosen: list[tuple[Candidate, int]] = []
+        deferred: list[Candidate] = []
+
+        for c in sorted(candidates, key=lambda c: (min(c.earliest_entry, years), -c.score)):
+            entry = min(c.earliest_entry, years)
+            while entry < years and per_year[entry] >= slots:
+                entry += 1
+            if per_year[entry] >= slots:
+                deferred.append(c)
+            per_year[entry] += 1
+            chosen.append((c, entry))
+
+        chosen.sort(key=lambda pair: (pair[1], -pair[0].score))
+        pools = self._pool_capacity(candidates, lim["availability"])
+        usage, binding = self._capacity_report(chosen, pools, inputs)
+        usage["source"] = "workflow"
+        usage["from_stage"] = inputs.from_stage
+        usage["stage_mix"] = self._stage_mix(chosen)
+        usage["over_subscribed"] = [c.id for c in deferred]
+        if deferred:
+            binding = binding + [
+                f"{len(deferred)} committed space(s) had no free entry slot inside the "
+                f"{years}-year window and are shown starting in year {years}"]
+        binding = sorted(set(binding))
+        usage["binding"] = binding
+        log.info("Planner: scheduled %d committed spaces from stage '%s'",
+                 len(chosen), inputs.from_stage)
+        return chosen, usage, binding
+
+    @staticmethod
+    def _stage_mix(chosen: list[tuple[Candidate, int]]) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for c, _ in chosen:
+            counts[c.stage or "unknown"] = counts.get(c.stage or "unknown", 0) + 1
+        total = len(chosen) or 1
+        return [{"key": stage, "label": WORKFLOW_STAGE_LABELS.get(stage, stage),
+                 "count": n, "share": round(n / total, 4)}
+                for stage, n in sorted(counts.items(),
+                                       key=lambda kv: WORKFLOW_STAGES.index(kv[0])
+                                       if kv[0] in WORKFLOW_STAGES else 99)]
+
+    def commitment_flags(self, selection: list[tuple[Candidate, int]],
+                         capacity: dict[str, Any], inputs: PlanInputs) -> list[dict[str, Any]]:
+        """What a committed set says that a chosen one cannot.
+
+        Under `parameters` an over-committed pool is impossible — the optimiser
+        would not have selected past it. Here it is the most useful thing on the
+        page: the business has already said yes to more than it can staff, and
+        the number is the size of the gap.
+        """
+        out: list[dict[str, Any]] = []
+        label = WORKFLOW_STAGE_LABELS.get(inputs.from_stage, inputs.from_stage)
+
+        over = [(pool, data) for pool, data in (capacity.get("pools") or {}).items()
+                if (data.get("peak_utilisation") or 0) > 1.0]
+        if over:
+            worst = max(over, key=lambda pair: pair[1]["peak_utilisation"])
+            out.append({
+                "kind": "over_commitment", "severity": "high",
+                "message": (
+                    f"{len(over)} capability pool(s) are committed beyond what is available for "
+                    f"new work — '{worst[0]}' peaks at {worst[1]['peak_utilisation']:.0%} of its "
+                    f"share. Nothing was dropped to make this fit, because the set came from the "
+                    f"workflow rather than the optimiser. Closing the gap means hiring, "
+                    f"partnering, raising the share of the pool available for new work, or "
+                    f"moving a space back down the gate."
+                ),
+            })
+
+        deferred = capacity.get("over_subscribed") or []
+        if deferred:
+            out.append({
+                "kind": "schedule", "severity": "medium",
+                "message": (
+                    f"{len(deferred)} committed space(s) could not be given an entry slot inside "
+                    f"the {inputs.plan_years}-year window and are shown starting in the final "
+                    f"year, which understates what they earn. Either the window is too short for "
+                    f"the committed set or too few spaces can be started per year."
+                ),
+            })
+
+        unsized = self.unsized_commitments(inputs)
+        if unsized:
+            out.append({
+                "kind": "unsized_commitment", "severity": "high",
+                "message": (
+                    f"{len(unsized)} space(s) at {label} or beyond carry no bottom-up market "
+                    f"size and contribute nothing to any figure here "
+                    f"({', '.join(u['id'] for u in unsized[:6])}"
+                    f"{'…' if len(unsized) > 6 else ''}). This plan is the committed portfolio "
+                    f"MINUS them, so treat the totals as a floor until they are sized."
+                ),
+            })
+
+        live = sum(1 for c, _ in selection if c.stage == "live")
+        if live:
+            out.append({
+                "kind": "already_live", "severity": "medium",
+                "message": (
+                    f"{live} selected space(s) are already Live. Their revenue is projected from "
+                    f"the start of the window as incremental, which double-counts anything "
+                    f"already booked. Read the total as the portfolio's run-rate rather than as "
+                    f"new business."
+                ),
+            })
+        return out
+
+    # ----------------------------------------------------------- candidates
+    #: The row shape both sources share. Kept in one place because the two
+    #: differ only in which rows they admit, never in what a row carries.
+    _CANDIDATE_SELECT = """
             SELECT o.id, o.statement, o.vertical, o.use_case, o.technology, o.domains,
-                   o.horizon, o.geographies,
+                   o.horizon, o.geographies, w.stage,
                    m.som_base, m.som_low, m.som_high, m.confidence,
                    (SELECT score FROM scores s WHERE s.opportunity_id=o.id
                      AND s.kind='attractiveness' ORDER BY computed_at DESC LIMIT 1) att,
@@ -228,30 +476,64 @@ class Planner:
                              FROM opportunity_links l
                              WHERE l.opportunity_id=o.id AND l.rejected=0), 4) dist
             FROM opportunity_spaces o
+            LEFT JOIN workflow_state w ON w.opportunity_id = o.id
             JOIN market_sizes m ON m.opportunity_id = o.id
                 AND m.method = 'bottom_up_adoption'
                 AND m.computed_at = (SELECT MAX(computed_at) FROM market_sizes x
                                      WHERE x.opportunity_id=o.id AND x.method='bottom_up_adoption')
-            WHERE o.merged_into IS NULL
-              AND o.state IN ('active','watchlist','fading')
-              AND m.som_base IS NOT NULL AND m.som_base > 0
-        """)
+    """
+
+    def candidates(self, inputs: PlanInputs) -> list[Candidate]:
+        """The set the plan is built from, resolved once.
+
+        Under `parameters` this is everything ADMISSIBLE: the hard constraints
+        are applied here, and the optimiser then chooses among what survives.
+
+        Under `workflow` it is everything COMMITTED — the stage gate has already
+        chosen, so the constraints are not applied at all. That is the whole
+        point of the mode rather than an oversight: a space a salesperson moved
+        to Demand-tested has a human's judgement behind it, and dropping it for
+        resting on a modelled size would be answering a decision with a filter.
+        """
+        pools = self._pools()
+        margins = self.econ["margin_by_distance"]
+        ramps = self.econ["ramp_by_horizon"]
+        efforts = self.econ["capacity"]["entry_effort_person_years"]
+        conf_floor = CONFIDENCE_RANK.get(inputs.min_confidence, 1)
+        comp_cap = COMPETITION_RANK.get(inputs.max_competition or "high", 3)
+        from_workflow = inputs.source == "workflow"
+
+        if from_workflow:
+            wanted = stages_from(inputs.from_stage)
+            rows = self.db.query(
+                self._CANDIDATE_SELECT + f"""
+                WHERE o.merged_into IS NULL
+                  AND w.stage IN ({",".join("?" * len(wanted))})
+                  AND m.som_base IS NOT NULL AND m.som_base > 0
+                """, tuple(wanted))
+        else:
+            rows = self.db.query(self._CANDIDATE_SELECT + """
+                WHERE o.merged_into IS NULL
+                  AND o.state IN ('active','watchlist','fading')
+                  AND m.som_base IS NOT NULL AND m.som_base > 0
+            """)
 
         out: list[Candidate] = []
         for r in rows:
-            if CONFIDENCE_RANK.get(r["confidence"], 2) > conf_floor:
-                continue
-            if r["dist"] > inputs.max_portfolio_distance:
-                continue
-            if r["vertical"] in inputs.exclude_verticals:
-                continue
-            if r["technology"] in inputs.exclude_technologies:
-                continue
-            if COMPETITION_RANK.get(r["comp"] or "none", 0) > comp_cap:
-                continue
-            geos = unjs(r["geographies"], []) or []
-            if inputs.geographies and geos and not (set(geos) & set(inputs.geographies)):
-                continue
+            if not from_workflow:
+                if CONFIDENCE_RANK.get(r["confidence"], 2) > conf_floor:
+                    continue
+                if r["dist"] > inputs.max_portfolio_distance:
+                    continue
+                if r["vertical"] in inputs.exclude_verticals:
+                    continue
+                if r["technology"] in inputs.exclude_technologies:
+                    continue
+                if COMPETITION_RANK.get(r["comp"] or "none", 0) > comp_cap:
+                    continue
+                geos = unjs(r["geographies"], []) or []
+                if inputs.geographies and geos and not (set(geos) & set(inputs.geographies)):
+                    continue
             domains = tuple(unjs(r["domains"], []) or [])
             horizon = r["horizon"] or "next"
             label = DISTANCE_LABELS[r["dist"]]
@@ -259,7 +541,8 @@ class Planner:
             cand = Candidate(
                 id=r["id"], statement=r["statement"], vertical=r["vertical"],
                 use_case=r["use_case"], technology=r["technology"], domains=domains,
-                horizon=horizon, distance=r["dist"],
+                horizon=horizon, distance=r["dist"], stage=r["stage"],
+                earliest_entry=self._earliest_entry(horizon, r["stage"], from_workflow),
                 som_base=r["som_base"] or 0.0, som_low=r["som_low"] or 0.0,
                 som_high=r["som_high"] or 0.0, confidence=r["confidence"],
                 attractiveness=r["att"] or 0.0, right_to_win=r["rtw"] or 0.0,
@@ -271,8 +554,28 @@ class Planner:
             )
             self._precompute(cand, inputs)
             out.append(cand)
-        log.info("Planner: %d candidates admissible of %d sized spaces", len(out), len(rows))
+        log.info("Planner: %d candidates from %s of %d sized spaces",
+                 len(out), inputs.source, len(rows))
         return out
+
+    @staticmethod
+    def _earliest_entry(horizon: str, stage: str | None, from_workflow: bool) -> int:
+        """The first plan year a space could start in.
+
+        The horizon is the market's answer — when the demand arrives. Under
+        `workflow` the stage is the pipeline's answer, and where the two
+        disagree the pipeline wins: a space that is already Live is not waiting
+        for anything, and scheduling it into year three would be projecting a
+        start date for something that has already started.
+
+        Under `parameters` the stage says nothing, because the set is being
+        chosen rather than reported and the market is the only thing that
+        governs when it could be entered.
+        """
+        earliest = HORIZON_EARLIEST.get(horizon, 2)
+        if not from_workflow:
+            return earliest
+        return min(earliest, STAGE_ENTRY_FLOOR.get(stage or "", earliest))
 
     def _precompute(self, c: Candidate, inputs: PlanInputs) -> None:
         """Revenue and score for every legal entry year.
@@ -282,7 +585,15 @@ class Planner:
         entry a real trade-off rather than free scheduling.
         """
         years = inputs.plan_years
-        earliest = HORIZON_EARLIEST.get(c.horizon, 2)
+        earliest = c.earliest_entry
+        if inputs.source == "workflow":
+            # A committed space stays in the plan even when its horizon puts the
+            # market beyond the window. It enters in the final year and earns
+            # whatever the first year of its ramp earns — which is close to
+            # nothing, and is the honest way to show a commitment whose market
+            # has not arrived yet. Dropping it would remove a space the business
+            # believes is in the plan.
+            earliest = min(earliest, years)
         for entry in range(earliest, years + 1):
             rev = [0.0] * years
             for i, f in enumerate(c.ramp):
@@ -739,6 +1050,8 @@ class Planner:
         As valuable as the inclusions, and the thing an optimiser can say that a
         human cannot: the reason is a constraint, and the constraint is named.
         """
+        if inputs.source == "workflow":
+            return self._workflow_exclusions(inputs)
         chosen_ids = {c.id for c, _ in selection}
         rest = [c for c in candidates if c.id not in chosen_ids]
         rest.sort(key=lambda c: -c.score)
@@ -760,6 +1073,52 @@ class Planner:
             })
         return out
 
+    def _workflow_exclusions(self, inputs: PlanInputs) -> list[dict]:
+        """What is NOT in a committed plan, and on whose decision.
+
+        Nothing here was excluded by the Planner — it excluded nothing. These
+        are spaces the stage gate has not moved far enough, or has stopped, or
+        that nobody has sized. Naming the stage rather than a constraint is the
+        difference between "the optimiser outranked it" and "it is waiting for
+        somebody".
+        """
+        label = WORKFLOW_STAGE_LABELS.get(inputs.from_stage, inputs.from_stage)
+        earlier = [st for st in WORKFLOW_STAGES
+                   if WORKFLOW_STAGES.index(st) < WORKFLOW_STAGES.index(inputs.from_stage)]
+        stages = earlier + ["parked", "rejected"]
+        out: list[dict] = []
+        for u in self.unsized_commitments(inputs):
+            out.append({
+                "opportunity_id": u["id"], "statement": _clip(u["statement"], 160),
+                "vertical": u["vertical"], "horizon": u["horizon"],
+                "distance": None, "value_forgone": None,
+                "reason": (f"at {WORKFLOW_STAGE_LABELS.get(u['stage'], u['stage'])} and committed, "
+                           f"but no bottom-up market size exists to project"),
+            })
+        if stages:
+            rows = self.db.query(f"""
+                SELECT o.id, o.statement, o.vertical, o.horizon, w.stage,
+                       (SELECT MAX(som_base) FROM market_sizes m
+                        WHERE m.opportunity_id=o.id AND m.method='bottom_up_adoption') som
+                FROM opportunity_spaces o
+                JOIN workflow_state w ON w.opportunity_id = o.id
+                WHERE o.merged_into IS NULL AND w.stage IN ({",".join("?" * len(stages))})
+                ORDER BY som IS NULL, som DESC LIMIT 20""", tuple(stages))
+            for r in rows:
+                stage = r["stage"]
+                reason = (f"parked by the {stage} decision on the workflow board"
+                          if stage in ("parked", "rejected") else
+                          f"still at {WORKFLOW_STAGE_LABELS.get(stage, stage)} — this plan starts "
+                          f"at {label}")
+                out.append({
+                    "opportunity_id": r["id"], "statement": _clip(r["statement"], 160),
+                    "vertical": r["vertical"], "horizon": r["horizon"],
+                    "distance": None,
+                    "value_forgone": round(r["som"], 2) if r["som"] else None,
+                    "reason": reason,
+                })
+        return out[:40]
+
 
     # ------------------------------------------------------------ narrative
     def narrate(self, plan_id: str) -> dict[str, Any]:
@@ -780,7 +1139,8 @@ class Planner:
         if not plan.get("selections"):
             raise ValueError("This plan selected nothing, so there is nothing to explain.")
 
-        system = prompts.plan_system_prompt(self.cfg)
+        system = prompts.plan_system_prompt(
+            self.cfg, source=(plan.get("inputs") or {}).get("source") or "parameters")
         user = prompts.format_plan_for_narrative(plan)
         payload = self.llm.complete_json(
             system, user, strong=True, max_tokens=4000,

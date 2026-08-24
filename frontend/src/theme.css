@@ -1760,6 +1760,22 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
               letter-spacing: .06em; color: var(--text-muted); }
 .pl-main { padding: 16px 20px; overflow-y: auto; }
 
+/* The source switch. A segmented control rather than a checkbox, because the
+   two modes are different questions — "what should we do" and "what have we
+   already committed to" — and the fields below change completely between them. */
+.pl-source {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px;
+  background: var(--surface-2);
+}
+.pl-source button {
+  font-size: 11.5px; padding: 5px 6px; border: none; background: none;
+  border-radius: 4px; cursor: pointer; color: var(--text-secondary);
+}
+.pl-source button[aria-pressed="true"] {
+  background: var(--accent); color: #fff; font-weight: 600;
+}
+
 .pl-form label { display: block; margin-bottom: 14px; }
 .pl-form label > span {
   display: block; font-size: 11.5px; font-weight: 600; margin-bottom: 4px;
@@ -1790,6 +1806,17 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
                  color: var(--text-muted); }
 .pl-stat-value { font-size: 19px; font-weight: 650; font-family: var(--mono); }
 .pl-stat-sub { font-size: 10px; color: var(--text-muted); }
+
+/* Said before the first figure on a workflow plan. Every number below reads
+   differently once the reader knows nobody optimised this set. */
+.pl-committed {
+  border-left: 3px solid var(--accent); background: var(--surface-1);
+  padding: 9px 12px; border-radius: 0 6px 6px 0; font-size: 12px;
+  margin: 0 0 12px; line-height: 1.55;
+}
+.pl-stage-mix { display: block; margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+.pl-stage-mix span { margin-right: 14px; }
+.pl-stage-mix strong { font-family: var(--mono); color: var(--text-primary); }
 
 .pl-flag {
   margin-top: 10px; padding: 8px 11px; border-radius: 6px; font-size: 11.5px;

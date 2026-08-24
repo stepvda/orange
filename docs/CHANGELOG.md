@@ -6,6 +6,68 @@ features that exposed them.
 
 ---
 
+## The Planner will plan the business you have already committed to
+
+**Added.** A second source for a plan. The Planner asked for parameters and
+chose a portfolio under them; it now also takes the portfolio as given —
+*Workflow selected* builds the plan from every opportunity space the
+collaboration board has moved to **Demand-tested or beyond**, and computes the
+rest.
+
+* **The stage gate outranks every constraint, and none of them is applied.** A
+  space at Demand-tested has a salesperson's judgement behind it. Dropping it
+  for resting on a modelled size, or for sitting one level too far out on
+  portfolio distance, answers a decision with an assumption band. So under this
+  source there is no evidence floor, no distance cap, no concentration limit and
+  no objective — because there is nothing to optimise. `selected_count` equals
+  `considered_count`, and a test asserts it.
+* **Horizon spreads the set across time.** Each space enters when its horizon
+  says the market arrives — `now` may start in year one, `later` not before year
+  three — and a cohort larger than a year's entry slots cascades into the next
+  year rather than pretending the capacity exists. Within a cohort the earlier
+  slots go to the largest commitments, so an over-subscribed year defers the
+  smallest rather than an arbitrary set.
+* **A Live space starts in year one whatever its horizon says.** The horizon
+  describes when the market arrives, which is a question already answered for
+  something that is already selling. Scheduling it into year three would be
+  projecting a start date for something that has started. The stage pulls entry
+  forward; it never pushes it back.
+* **Over-commitment is the finding, not a reason to edit the portfolio.** Under
+  the optimiser a capability pool cannot be over-committed — it would not have
+  selected past one. Here the business already has, so nothing is dropped to
+  make the numbers work: the pool that peaks above its available share is
+  flagged with the size of the gap, and the plan names what closes it — hiring,
+  partnering, raising the share available for new work, or moving a space back
+  down the gate.
+* **A committed space with no market size is declared rather than dropped.** It
+  is in the plan as far as the business is concerned and absent from every
+  figure on the page. Left silent it understates a portfolio the reader believes
+  is complete, so it is listed by id, flagged, and the totals are described as a
+  floor.
+* **What is *not* in the plan says whose decision that was.** The exclusions
+  list under this source names a stage rather than a constraint: still at
+  Shortlisted, stopped on the board, or unsized. Nothing there was excluded by
+  the Planner, and the document says so.
+* **The prose knows which question it is answering.** A narrative written for a
+  committed set may not describe alternatives being weighed, because none were.
+  The system prompt splits on the source (`plan-v2`), the evidence block states
+  where the set came from, and the exported PDF opens with *this plan did not
+  select anything* — before the first figure, because everything below it reads
+  differently once the reader knows that.
+* **Two sources, two plans.** The source is part of the plan's fingerprint, so a
+  committed plan can never quietly overwrite the parameter plan it was built to
+  be compared against.
+* **Failure speaks in the terms of the mode that was used.** An empty board
+  sends the reader to the workflow board and says how many spaces are waiting a
+  stage earlier. Telling them to loosen a confidence floor would send them to a
+  control that is not on their screen.
+
+Reachable from the Planner sidebar, from `POST /api/planner/plans` with
+`source: "workflow"`, and from `radar plan --source workflow --from-stage
+demand_tested`.
+
+---
+
 ## Pre-sales collateral: twelve documents per space, in the format you work in
 
 **Added.** A fourth tab on the full-screen view of an opportunity space. The

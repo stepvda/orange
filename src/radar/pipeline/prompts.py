@@ -917,10 +917,10 @@ def format_plan_for_narrative(plan: dict[str, Any]) -> str:
             f"{plan.get('selected_count')} committed spaces, scheduled by horizon and by how "
             f"many new spaces can be started in a year.",
         ]
-        mix = cap.get("stage_mix") or []
-        if mix:
+        stage_mix = cap.get("stage_mix") or []
+        if stage_mix:
             lines.append("Where they stand on the gate: " + ", ".join(
-                f"{m['label']} {m['count']}" for m in mix))
+                f"{m['label']} {m['count']}" for m in stage_mix))
         lines += ["", "PORTFOLIO SHAPE (shares, for your qualitative description only)"]
     else:
         lines = [

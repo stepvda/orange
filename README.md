@@ -616,6 +616,23 @@ The radar answers "which opportunity", one space at a time. The Planner answers
 "which opportunities, in what order, and what do they earn" — which is a
 different question, and the reason it opens full screen rather than in a pane.
 
+**Two sources for the portfolio, and they are different questions.** Under
+*Parameters* the caller states constraints and the optimiser chooses the set —
+the exploratory question, what *should* we do. Under *Workflow selected* the set
+is already decided: every opportunity space the collaboration board has moved to
+**Demand-tested or beyond** is in, and none of the constraints is applied to it,
+because each would overrule a decision a strategist, a salesperson or a presales
+engineer has already taken. That mode answers what the business already
+committed to earns, and when. The Planner then does the part nobody did by hand:
+each space enters when its horizon says the market arrives, a cohort larger than
+a year's capacity cascades forward, a space already Live starts in year one
+whatever its horizon says, and revenue, margin, ramp, overlap discount and
+capability load follow. **Nothing is dropped to make it fit.** Where the
+committed set needs more than the capability pools can staff, the plan says so
+and by how much — that gap is the finding, not a reason to edit the portfolio —
+and a committed space with no market size is listed as a gap rather than
+silently missing from a total the reader believes is complete.
+
 **Selection is an optimisation, not a ranking.** A ranked list assumes you can
 take the top N, and you cannot: Orange cannot enter 400 spaces at once, or even
 twelve in one vertical. A mixed-integer program (scipy `optimize.milp`, HiGHS)

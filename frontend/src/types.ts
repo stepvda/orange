@@ -750,6 +750,11 @@ export interface PlanRequest {
   label: string
   objective: string
   plan_years: number
+  /** Where the SET comes from. `parameters` lets the optimiser choose under the
+   *  constraints below; `workflow` takes what the stage gate already decided and
+   *  applies none of them. */
+  source?: 'parameters' | 'workflow'
+  from_stage?: string
   budget_person_years?: number | null
   entry_slots_per_year?: number | null
   pool_availability?: number | null
@@ -816,6 +821,11 @@ export interface Plan {
     pools?: Record<string, { capacity: number; used_by_year: number[]; peak_utilisation: number | null }>
     slots?: Record<string, { used: number; available: number }>
     binding?: string[]
+    /* Present only on a plan built from the workflow. */
+    source?: string
+    from_stage?: string
+    stage_mix?: { key: string; label: string; count: number; share: number }[]
+    over_subscribed?: string[]
   }
   exclusions: { opportunity_id: string; statement: string; vertical: string; reason: string }[]
   flags: { kind: string; severity: string; message: string }[]
@@ -845,6 +855,17 @@ export interface PlannerMeta {
   sizes_by_confidence: Record<string, number>
   verticals: { id: string; label: string }[]
   domains: { id: string; label: string }[]
+  /** What the stage gate has committed. `cumulative_sized` is the number the
+   *  form must quote: a committed space with no market size contributes nothing
+   *  to any figure, so counting it would promise a bigger plan than comes back. */
+  workflow: {
+    stages: {
+      id: string; label: string; count: number; sized: number
+      cumulative: number; cumulative_sized: number
+    }[]
+    default_from_stage: string
+    parked: number
+  }
 }
 
 export interface PlanReport {

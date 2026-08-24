@@ -18,6 +18,20 @@ import {
  * narrative), and the written half is absent until somebody asks for it. Every
  * figure on the page came from the optimiser; the model is only allowed to
  * explain them, and it may not introduce one.
+ *
+ * TWO SOURCES, AND THE SIDEBAR IS THE CHOICE BETWEEN THEM. Under `parameters`
+ * the caller states constraints and the optimiser picks the set — the
+ * exploratory question, what SHOULD we do. Under `workflow` the set is already
+ * decided: everything the stage gate has moved to Demand-tested or beyond, with
+ * no constraint applied to it, because each would overrule a human decision
+ * with an assumption band. The second mode answers what the business we have
+ * already committed to earns, and when.
+ *
+ * The modes are not two views of one plan. They produce different plan ids and
+ * are read differently, so the screen says which one it is looking at
+ * everywhere the difference changes the reading — most of all where a
+ * capability pool is over-committed, which is impossible under one mode and the
+ * most useful number on the page under the other.
  */
 
 const EUR = (v?: number | null) => {
@@ -48,6 +62,15 @@ const SECTION_TITLES: Record<string, string> = {
   not_doing: 'What we are not doing',
 }
 
+/** The stage a plan started from, in the label the workflow board uses. Read
+ *  from meta so one rename on the backend does not leave two spellings in the
+ *  interface. */
+const stageLabel = (id: string | undefined, meta: PlannerMeta | null) =>
+  (meta?.workflow?.stages ?? []).find((s) => s.id === id)?.label ?? 'Demand-tested'
+
+const workflowCount = (meta: PlannerMeta | null, stage: string) =>
+  (meta?.workflow?.stages ?? []).find((s) => s.id === stage)?.cumulative ?? 0
+
 function Stat({ label, value, sub, tone }: {
   label: string; value: string; sub?: string; tone?: 'accent' | 'warn'
 }) {
@@ -60,8 +83,29 @@ function Stat({ label, value, sub, tone }: {
   )
 }
 
-function Form({ meta, busy, onRun }: {
-  meta: PlannerMeta; busy: boolean; onRun: (req: PlanRequest) => void
+/** The two ways a portfolio gets into a plan.
+ *
+ * Presented as a choice rather than a checkbox because they are different
+ * questions, not one question with an option. `parameters` asks what we SHOULD
+ * do; `workflow` asks what the business has ALREADY DECIDED to do and what that
+ * earns. Nothing in the second half of the form applies to the second question.
+ */
+const SOURCES = [
+  { id: 'parameters' as const, label: 'Parameters' },
+  { id: 'workflow' as const, label: 'Workflow selected' },
+]
+
+/** Only the stages that can start a plan. Nobody plans from Shortlisted: the
+ *  stage means "worth looking at", and a plan built on it would be projecting
+ *  revenue from a decision nobody has taken. */
+const PLANNABLE_FROM = ['demand_tested', 'packaged', 'live']
+
+function Form({ meta, busy, source, onSource, onRun }: {
+  meta: PlannerMeta
+  busy: boolean
+  source: 'parameters' | 'workflow'
+  onSource: (s: 'parameters' | 'workflow') => void
+  onRun: (req: PlanRequest) => void
 }) {
   const d = meta.defaults ?? {}
   const cap = meta.capacity ?? {}
@@ -69,6 +113,7 @@ function Form({ meta, busy, onRun }: {
     label: 'Five-year portfolio plan',
     objective: 'profit',
     plan_years: 5,
+    from_stage: meta.workflow?.default_from_stage ?? 'demand_tested',
     min_confidence: 'partial',
     max_portfolio_distance: 3,
     entry_slots_per_year: cap.entry_slots_per_year ?? 12,
@@ -81,93 +126,168 @@ function Form({ meta, busy, onRun }: {
   const set = <K extends keyof PlanRequest>(k: K, v: PlanRequest[K]) =>
     setReq((r) => ({ ...r, [k]: v }))
 
+  const stages = (meta.workflow?.stages ?? []).filter((s) => PLANNABLE_FROM.includes(s.id))
+  const chosen = stages.find((s) => s.id === req.from_stage)
+  const committed = chosen?.cumulative ?? 0
+  const projectable = chosen?.cumulative_sized ?? 0
+  const unsized = committed - projectable
+
   return (
-    <form className="pl-form" onSubmit={(e) => { e.preventDefault(); onRun(req) }}>
+    <form className="pl-form" onSubmit={(e) => { e.preventDefault(); onRun({ ...req, source }) }}>
+      <div className="pl-source" role="group" aria-label="Where the portfolio comes from">
+        {SOURCES.map((s) => (
+          <button key={s.id} type="button" aria-pressed={source === s.id}
+                  onClick={() => onSource(s.id)}>{s.label}</button>
+        ))}
+      </div>
+
       <label>
         <span>Plan name</span>
         <input value={req.label} onChange={(e) => set('label', e.target.value)} />
       </label>
 
-      <label>
-        <span>Objective</span>
-        <select value={req.objective} onChange={(e) => set('objective', e.target.value)}>
-          <option value="profit">Maximise 5-year profit</option>
-          <option value="revenue">Maximise 5-year revenue</option>
-          <option value="npv">Maximise NPV of profit</option>
-          <option value="strategic_coverage">Maximise strategic coverage</option>
-        </select>
-        <em>Different objectives give materially different portfolios. This is a decision.</em>
-      </label>
+      {source === 'workflow' ? (
+        <>
+          <label>
+            <span>Include everything from</span>
+            <select value={req.from_stage}
+                    onChange={(e) => set('from_stage', e.target.value)}>
+              {stages.map((s) => (
+                <option key={s.id} value={s.id}>{s.label} or further</option>
+              ))}
+            </select>
+            <em>
+              {committed} space{committed === 1 ? '' : 's'} have reached this stage
+              {projectable !== committed && <> · <strong>{projectable}</strong> can be projected</>}
+              {unsized > 0 && <> · {unsized} carry no market size and will be listed as a gap</>}
+            </em>
+          </label>
 
-      <label>
-        <span>New spaces started per year</span>
-        <input type="number" min={1} max={60} value={req.entry_slots_per_year ?? 12}
-               onChange={(e) => set('entry_slots_per_year', Number(e.target.value))} />
-        <em>Governance, bid capacity and sales enablement — not headcount.</em>
-      </label>
+          <label>
+            <span>Plan horizon (years)</span>
+            <input type="number" min={1} max={10} value={req.plan_years}
+                   onChange={(e) => set('plan_years', Number(e.target.value))} />
+            <em>Commitments whose market arrives after the window still appear, in the
+              final year, earning what their first ramp year earns.</em>
+          </label>
 
-      <label>
-        <span>Capability headcount available for new work</span>
-        <input type="range" min={0.05} max={0.5} step={0.01}
-               value={req.pool_availability ?? 0.15}
-               onChange={(e) => set('pool_availability', Number(e.target.value))} />
-        <em>{Math.round((req.pool_availability ?? 0.15) * 100)}% of each pool. The rest runs
-          the existing business.</em>
-      </label>
+          <label>
+            <span>New spaces started per year</span>
+            <input type="number" min={1} max={60} value={req.entry_slots_per_year ?? 12}
+                   onChange={(e) => set('entry_slots_per_year', Number(e.target.value))} />
+            <em>Spreads the schedule; it never removes anything. A cohort bigger than
+              this cascades into the next year.</em>
+          </label>
 
-      <label>
-        <span>Evidence floor</span>
-        <select value={req.min_confidence}
-                onChange={(e) => set('min_confidence', e.target.value)}>
-          <option value="observed">Observed sizes only — strictest</option>
-          <option value="partial">Observed and partial</option>
-          <option value="modelled">Everything, including modelled</option>
-        </select>
-        <em>
-          {meta.sizes_by_confidence?.observed ?? 0} observed ·{' '}
-          {meta.sizes_by_confidence?.partial ?? 0} partial ·{' '}
-          {meta.sizes_by_confidence?.modelled ?? 0} modelled
-        </em>
-      </label>
+          <label>
+            <span>Capability headcount available for new work</span>
+            <input type="range" min={0.05} max={0.5} step={0.01}
+                   value={req.pool_availability ?? 0.15}
+                   onChange={(e) => set('pool_availability', Number(e.target.value))} />
+            <em>{Math.round((req.pool_availability ?? 0.15) * 100)}% of each pool. Here this
+              measures the commitment rather than limiting it — a pool over 100% is
+              reported, not resolved by dropping a space.</em>
+          </label>
 
-      <label>
-        <span>Furthest portfolio distance</span>
-        <select value={req.max_portfolio_distance}
-                onChange={(e) => set('max_portfolio_distance', Number(e.target.value))}>
-          <option value={0}>L0 — existing offer only</option>
-          <option value={1}>L0–L1 — bundles allowed</option>
-          <option value={2}>L0–L2 — partner-dependent allowed</option>
-          <option value={3}>L0–L3 — one capability build allowed</option>
-          <option value={4}>L0–L4 — including white space</option>
-        </select>
-      </label>
+          <button className="pl-run" disabled={busy || projectable === 0}>
+            {busy ? 'Computing…' : 'Generate the business plan'}
+          </button>
+          {projectable === 0 && (
+            <p className="pl-form-note">
+              Nothing at this stage carries a bottom-up market size, so there is nothing to
+              project. Size the spaces first, or move one further along the workflow board.
+            </p>
+          )}
+          <p className="pl-form-note">
+            The workflow chose this set — no evidence floor, distance cap or concentration
+            limit is applied, because each would overrule a decision somebody already took.
+            What is computed here is the schedule and the arithmetic.
+          </p>
+        </>
+      ) : (
+        <>
+          <label>
+            <span>Objective</span>
+            <select value={req.objective} onChange={(e) => set('objective', e.target.value)}>
+              <option value="profit">Maximise 5-year profit</option>
+              <option value="revenue">Maximise 5-year revenue</option>
+              <option value="npv">Maximise NPV of profit</option>
+              <option value="strategic_coverage">Maximise strategic coverage</option>
+            </select>
+            <em>Different objectives give materially different portfolios. This is a decision.</em>
+          </label>
 
-      <label>
-        <span>Maximum share in any one vertical</span>
-        <input type="range" min={0.15} max={1} step={0.05}
-               value={req.max_share_per_vertical ?? 0.4}
-               onChange={(e) => set('max_share_per_vertical', Number(e.target.value))} />
-        <em>{Math.round((req.max_share_per_vertical ?? 0.4) * 100)}%. Without a cap the
-          optimiser returns a single-vertical plan and calls it a portfolio.</em>
-      </label>
+          <label>
+            <span>New spaces started per year</span>
+            <input type="number" min={1} max={60} value={req.entry_slots_per_year ?? 12}
+                   onChange={(e) => set('entry_slots_per_year', Number(e.target.value))} />
+            <em>Governance, bid capacity and sales enablement — not headcount.</em>
+          </label>
 
-      <label>
-        <span>Prefer verticals</span>
-        <select multiple size={5} value={req.prefer_verticals ?? []}
-                onChange={(e) => set('prefer_verticals',
-                  Array.from(e.target.selectedOptions).map((o) => o.value))}>
-          {meta.verticals?.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-        </select>
-        <em>A tilt, not a filter.</em>
-      </label>
+          <label>
+            <span>Capability headcount available for new work</span>
+            <input type="range" min={0.05} max={0.5} step={0.01}
+                   value={req.pool_availability ?? 0.15}
+                   onChange={(e) => set('pool_availability', Number(e.target.value))} />
+            <em>{Math.round((req.pool_availability ?? 0.15) * 100)}% of each pool. The rest runs
+              the existing business.</em>
+          </label>
 
-      <button className="pl-run" disabled={busy}>
-        {busy ? 'Optimising…' : 'Build the plan'}
-      </button>
-      <p className="pl-form-note">
-        Selection and projection are arithmetic — no model call, so this is fast. The written
-        business plan is a separate step.
-      </p>
+          <label>
+            <span>Evidence floor</span>
+            <select value={req.min_confidence}
+                    onChange={(e) => set('min_confidence', e.target.value)}>
+              <option value="observed">Observed sizes only — strictest</option>
+              <option value="partial">Observed and partial</option>
+              <option value="modelled">Everything, including modelled</option>
+            </select>
+            <em>
+              {meta.sizes_by_confidence?.observed ?? 0} observed ·{' '}
+              {meta.sizes_by_confidence?.partial ?? 0} partial ·{' '}
+              {meta.sizes_by_confidence?.modelled ?? 0} modelled
+            </em>
+          </label>
+
+          <label>
+            <span>Furthest portfolio distance</span>
+            <select value={req.max_portfolio_distance}
+                    onChange={(e) => set('max_portfolio_distance', Number(e.target.value))}>
+              <option value={0}>L0 — existing offer only</option>
+              <option value={1}>L0–L1 — bundles allowed</option>
+              <option value={2}>L0–L2 — partner-dependent allowed</option>
+              <option value={3}>L0–L3 — one capability build allowed</option>
+              <option value={4}>L0–L4 — including white space</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Maximum share in any one vertical</span>
+            <input type="range" min={0.15} max={1} step={0.05}
+                   value={req.max_share_per_vertical ?? 0.4}
+                   onChange={(e) => set('max_share_per_vertical', Number(e.target.value))} />
+            <em>{Math.round((req.max_share_per_vertical ?? 0.4) * 100)}%. Without a cap the
+              optimiser returns a single-vertical plan and calls it a portfolio.</em>
+          </label>
+
+          <label>
+            <span>Prefer verticals</span>
+            <select multiple size={5} value={req.prefer_verticals ?? []}
+                    onChange={(e) => set('prefer_verticals',
+                      Array.from(e.target.selectedOptions).map((o) => o.value))}>
+              {meta.verticals?.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+            </select>
+            <em>A tilt, not a filter.</em>
+          </label>
+
+          <button className="pl-run" disabled={busy}>
+            {busy ? 'Optimising…' : 'Build the plan'}
+          </button>
+          <p className="pl-form-note">
+            Selection and projection are arithmetic — no model call, so this is fast. The written
+            business plan is a separate step.
+          </p>
+        </>
+      )}
     </form>
   )
 }
@@ -182,6 +302,7 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
   const [writing, setWriting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
+  const [source, setSource] = useState<'parameters' | 'workflow'>('parameters')
   const [report, setReport] = useState<PlanReport | null>(null)
   const [exporting, setExporting] = useState(false)
   const closeRef = useRef<HTMLButtonElement | null>(null)
@@ -228,6 +349,11 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
   }, [tab, plan, report, exporting, exportPdf])
 
   const p = plan?.projection
+  // Which question this plan answered. Read off the plan rather than the
+  // sidebar, so a plan stays labelled correctly after the toggle has moved on.
+  const fromWorkflow = plan?.inputs?.source === 'workflow'
+  const fromStage = plan?.capacity_usage?.from_stage
+  const stageMix = plan?.capacity_usage?.stage_mix ?? []
 
   return (
     <div className="fs-screen pl-screen">
@@ -235,6 +361,12 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
         <div className="fs-title">
           <div className="fs-badges">
             <span className="badge">PLANNER</span>
+            {fromWorkflow && (
+              <span className="badge explore"
+                    title="The set came from the workflow board, not from the optimiser">
+                FROM WORKFLOW
+              </span>
+            )}
             {plan && <span className="badge">{plan.id}</span>}
             {meta && <span className="badge" title="The assumption set this plan rests on">
               {meta.economics_version}
@@ -243,8 +375,13 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
           <h2>{plan ? plan.label : 'Five-year portfolio plan'}</h2>
           <p className="fs-triple">
             {plan
-              ? `${plan.selected_count} spaces selected from ${plan.considered_count} admissible candidates`
-              : `${meta?.plannable_spaces ?? '…'} sized spaces available to plan over`}
+              ? fromWorkflow
+                ? `${plan.selected_count} committed spaces, scheduled across ${plan.plan_years} years`
+                  + ` — everything at ${stageLabel(fromStage, meta)} or further`
+                : `${plan.selected_count} spaces selected from ${plan.considered_count} admissible candidates`
+              : source === 'workflow'
+                ? `${workflowCount(meta, 'demand_tested')} spaces are Demand-tested or further`
+                : `${meta?.plannable_spaces ?? '…'} sized spaces available to plan over`}
           </p>
           {/* Said here rather than buried in the assumptions tab: the two figures
               that turn a market size into money are Orange's own filed numbers,
@@ -276,7 +413,7 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
       <div className="fs-body pl-body">
         <aside className="pl-side">
           <h3>Parameters</h3>
-          {meta ? <Form meta={meta} busy={busy} onRun={run} />
+          {meta ? <Form meta={meta} busy={busy} source={source} onSource={setSource} onRun={run} />
                 : <p className="ca-muted">Loading…</p>}
           {plan && (
             <button className="pl-export" onClick={exportPdf} disabled={exporting}
@@ -298,29 +435,82 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
                 here. Every projection is also checked against the segment revenue Orange filed,
                 so a plan that implies implausible growth says so.
               </p>
-              <p>
-                Set the constraints on the left and build one. The optimiser selects a set of
-                opportunity spaces, schedules when each is entered, and projects revenue and
-                profit across the plan window.
-              </p>
-              <p className="ca-muted">
-                It is a scenario under stated assumptions, not a forecast. Every projection
-                carries its interval and is checked against Orange's own filed segment revenue.
-              </p>
+              {source === 'workflow' ? (
+                <>
+                  <p>
+                    <strong>The portfolio is already chosen.</strong> Every opportunity space the
+                    workflow board has moved to {stageLabel(meta?.workflow?.default_from_stage, meta)}{' '}
+                    or beyond is in this plan — {workflowCount(meta, 'demand_tested')} of them
+                    today. No evidence floor, distance cap or concentration limit is applied,
+                    because each of those would overrule a decision a strategist, a salesperson or
+                    a presales engineer has already taken.
+                  </p>
+                  <p>
+                    What is computed is the rest of it: each space enters when its horizon says the
+                    market arrives, cohorts bigger than a year&apos;s capacity cascade forward, and
+                    the revenue, margin, ramp, overlap discount and capability load follow from
+                    there. A space already Live starts in year one whatever its horizon says.
+                  </p>
+                  <p className="ca-muted">
+                    Nothing is dropped to make the numbers work. Where the committed set needs more
+                    than the capability pools can staff, the plan says so and by how much — that
+                    gap is the finding, not a reason to edit the portfolio.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Set the constraints on the left and build one. The optimiser selects a set of
+                    opportunity spaces, schedules when each is entered, and projects revenue and
+                    profit across the plan window.
+                  </p>
+                  <p className="ca-muted">
+                    It is a scenario under stated assumptions, not a forecast. Every projection
+                    carries its interval and is checked against Orange's own filed segment revenue.
+                  </p>
+                  <p className="ca-muted">
+                    Nothing has been decided yet at this point — that is what this mode is for. To
+                    plan the business already committed on the workflow board instead, switch to{' '}
+                    <strong>Workflow selected</strong>.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
           {plan && p && tab === 'overview' && (
             <>
+              {/* Said before the first figure. Everything below reads differently
+                  depending on who chose the set — most of all a pool over 100%,
+                  which cannot happen under the optimiser and is the whole point
+                  of the page under the workflow. */}
+              {fromWorkflow && (
+                <p className="pl-committed">
+                  <strong>Nothing here was selected by the Planner.</strong> This is every
+                  opportunity space the workflow board has moved to {stageLabel(fromStage, meta)}{' '}
+                  or beyond, scheduled across the window and costed. The optimiser chose nothing
+                  and rejected nothing.
+                  {stageMix.length > 0 && (
+                    <span className="pl-stage-mix">
+                      {stageMix.map((m) => (
+                        <span key={m.key}><strong>{m.count}</strong> {m.label}</span>
+                      ))}
+                    </span>
+                  )}
+                </p>
+              )}
+
               <div className="pl-stats">
-                <Stat label="5-year revenue" value={EUR(p.revenue_total)} />
-                <Stat label="5-year profit" value={EUR(p.profit_total)} tone="accent"
+                <Stat label={`${plan.plan_years}-year revenue`} value={EUR(p.revenue_total)} />
+                <Stat label={`${plan.plan_years}-year profit`} value={EUR(p.profit_total)} tone="accent"
                       sub={`band ${EUR(p.profit_total_low)} – ${EUR(p.profit_total_high)}`} />
                 <Stat label={`NPV @ ${(p.discount_rate * 100).toFixed(1)}%`} value={EUR(p.npv_profit)}
                       sub="Orange's filed discount rate" />
-                <Stat label="Spaces" value={String(plan.selected_count)}
-                      sub={`of ${plan.considered_count} admissible`} />
-                <Stat label="Year-5 vs segment"
+                <Stat label={fromWorkflow ? 'Committed spaces' : 'Spaces'}
+                      value={String(plan.selected_count)}
+                      sub={fromWorkflow ? `at ${stageLabel(fromStage, meta)} or further`
+                                        : `of ${plan.considered_count} admissible`} />
+                <Stat label={`Year-${plan.plan_years} vs segment`}
                       value={`${((p.year5_share_of_segment ?? 0) * 100).toFixed(1)}%`}
                       tone={(p.year5_share_of_segment ?? 0) > 0.15 ? 'warn' : undefined}
                       sub="of filed Orange Business revenue" />
@@ -343,10 +533,14 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
 
               {(plan.capacity_usage?.binding ?? []).length > 0 && (
                 <div className="pl-binding">
-                  <h4>What bound this plan</h4>
+                  <h4>{fromWorkflow ? 'What the schedule ran into' : 'What bound this plan'}</h4>
                   <p className="ca-muted">
-                    These are the constraints the optimiser hit. Relaxing one is what would
-                    change the answer.
+                    {fromWorkflow
+                      ? 'The committed set was scheduled, not selected, so these are limits the '
+                        + 'schedule met rather than constraints that removed anything. Nothing was '
+                        + 'dropped to satisfy them.'
+                      : 'These are the constraints the optimiser hit. Relaxing one is what would '
+                        + 'change the answer.'}
                   </p>
                   <ul>{plan.capacity_usage!.binding!.map((b) => <li key={b}>{b}</li>)}</ul>
                 </div>
@@ -356,7 +550,7 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
 
           {plan && tab === 'spaces' && (
             <>
-              <h3>Selected spaces, in entry order</h3>
+              <h3>{fromWorkflow ? 'Committed spaces, in entry order' : 'Selected spaces, in entry order'}</h3>
               <table className="data pl-table">
                 <thead>
                   <tr>
@@ -386,7 +580,12 @@ export default function PlannerScreen({ onClose, onOpenTopic }: {
 
               {(plan.exclusions ?? []).length > 0 && (
                 <details className="pl-exclusions">
-                  <summary>{plan.exclusions.length} near-miss space(s), and why each was left out</summary>
+                  <summary>
+                    {fromWorkflow
+                      ? `${plan.exclusions.length} space(s) not in this plan, and why — none of `
+                        + 'them excluded here'
+                      : `${plan.exclusions.length} near-miss space(s), and why each was left out`}
+                  </summary>
                   <table className="data">
                     <tbody>
                       {plan.exclusions.map((e) => (

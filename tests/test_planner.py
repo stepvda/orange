@@ -447,3 +447,241 @@ def test_missing_descriptions_are_counted_once_rather_than_left_as_a_gap(cfg, db
     plan = Planner(cfg, db).plan(PlanInputs(label="Coverage"))
     text = _pdf_text(PlanReportBuilder(cfg, db, output_dir=tmp_path).build(plan)["path"])
     assert f"1 of {plan['selected_count']} selected spaces have a long-form description" in text
+
+
+# ----------------------------------------------------- the committed set
+
+def stage(db, topic_id, stage_name):
+    """Put a space on the workflow board at a given stage of the gate."""
+    now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    with db.cursor() as cur:
+        cur.execute("""INSERT INTO workflow_state
+                       (opportunity_id, stage, owner_role, entered_stage_at, updated_at)
+                       VALUES (?,?,'sales',?,?)
+                       ON CONFLICT(opportunity_id) DO UPDATE SET stage=excluded.stage""",
+                    (topic_id, stage_name, now, now))
+
+
+def test_a_workflow_plan_takes_everything_demand_tested_or_further(cfg, db):
+    """The stage gate chose the set. The Planner does not get a second vote."""
+    seed(db, cfg, n=6, headcount=200000)
+    for i, name in enumerate(["shortlisted", "shortlisted", "demand_tested",
+                              "demand_tested", "packaged", "live"]):
+        stage(db, f"OS{i:03d}", name)
+
+    plan = Planner(cfg, db).plan(PlanInputs(source="workflow", entry_slots_per_year=99))
+    chosen = {s["opportunity_id"] for s in plan["selections"]}
+    assert chosen == {"OS002", "OS003", "OS004", "OS005"}
+    assert plan["selected_count"] == plan["considered_count"], (
+        "a committed plan considered more than it selected — something was dropped")
+
+
+def test_a_committed_space_survives_the_filters_a_parameter_plan_would_apply(cfg, db):
+    """A salesperson who confirmed demand outranks a confidence floor.
+
+    The same space is inadmissible under parameters — modelled size, L4 distance
+    — and is in the plan under workflow, because a human already decided.
+    """
+    seed(db, cfg, n=3, confidence="modelled", distance=4, headcount=200000)
+    for i in range(3):
+        stage(db, f"OS{i:03d}", "demand_tested")
+
+    with pytest.raises(ValueError):
+        Planner(cfg, db).plan(PlanInputs(min_confidence="observed", max_portfolio_distance=2))
+
+    plan = Planner(cfg, db).plan(PlanInputs(
+        source="workflow", min_confidence="observed", max_portfolio_distance=2,
+        entry_slots_per_year=99))
+    assert plan["selected_count"] == 3
+
+
+def test_the_horizon_spreads_a_committed_set_across_the_window(cfg, db):
+    """`now` may start in year one, `later` not before year three. Without this
+    a committed plan would be everything entering at once, which is not a plan."""
+    seed(db, cfg, n=2, horizon="now", headcount=200000)
+    seed_horizon(db, prefix="OL", n=2, horizon="later")
+    for tid in ("OS000", "OS001", "OL000", "OL001"):
+        stage(db, tid, "demand_tested")
+
+    plan = Planner(cfg, db).plan(PlanInputs(source="workflow", entry_slots_per_year=99))
+    entry = {s["opportunity_id"]: s["entry_year"] for s in plan["selections"]}
+    assert entry["OS000"] == 1 and entry["OS001"] == 1
+    assert entry["OL000"] == 3 and entry["OL001"] == 3
+
+
+def test_a_live_space_enters_in_year_one_whatever_its_horizon(cfg, db):
+    """The horizon says when the market arrives. For a Live space that question
+    has already been answered, so the stage pulls entry forward."""
+    seed(db, cfg, n=0, headcount=200000)
+    seed_horizon(db, prefix="OL", n=1, horizon="later")
+    stage(db, "OL000", "live")
+    plan = Planner(cfg, db).plan(PlanInputs(source="workflow"))
+    assert plan["selections"][0]["entry_year"] == 1
+
+
+def test_an_over_subscribed_year_cascades_rather_than_dropping_a_commitment(cfg, db):
+    seed(db, cfg, n=9, horizon="now", headcount=200000)
+    for i in range(9):
+        stage(db, f"OS{i:03d}", "demand_tested")
+
+    plan = Planner(cfg, db).plan(PlanInputs(source="workflow", entry_slots_per_year=3))
+    by_year: dict[int, int] = {}
+    for s in plan["selections"]:
+        by_year[s["entry_year"]] = by_year.get(s["entry_year"], 0) + 1
+    assert len(plan["selections"]) == 9, "a committed space was dropped to fit the slots"
+    assert max(by_year.values()) <= 3
+    assert sorted(by_year) == [1, 2, 3]
+
+
+def test_over_committed_capacity_is_reported_not_resolved_by_dropping_a_space(cfg, db):
+    """Under parameters the optimiser would never select past a pool. Here the
+    business already has, and the size of the gap is the most useful number on
+    the page — so the plan keeps every space and says so."""
+    seed(db, cfg, n=12, distance=3, headcount=100, horizon="now")
+    for i in range(12):
+        stage(db, f"OS{i:03d}", "demand_tested")
+
+    plan = Planner(cfg, db).plan(
+        PlanInputs(source="workflow", entry_slots_per_year=99, pool_availability=0.15))
+    assert plan["selected_count"] == 12
+    peaks = [d["peak_utilisation"] for d in plan["capacity_usage"]["pools"].values()]
+    assert max(peaks) > 1.0
+    assert any(f["kind"] == "over_commitment" for f in plan["flags"])
+
+
+def test_a_committed_space_with_no_size_is_declared_rather_than_dropped(cfg, db):
+    """It is in the plan as far as the business is concerned and absent from
+    every figure on the page. A silent drop understates the portfolio."""
+    seed(db, cfg, n=2, headcount=200000)
+    stage(db, "OS000", "demand_tested")
+    stage(db, "OS001", "demand_tested")
+    with db.cursor() as cur:
+        cur.execute("DELETE FROM market_sizes WHERE opportunity_id = 'OS001'")
+
+    plan = Planner(cfg, db).plan(PlanInputs(source="workflow"))
+    assert plan["selected_count"] == 1
+    flag = next(f for f in plan["flags"] if f["kind"] == "unsized_commitment")
+    assert "OS001" in flag["message"]
+    assert any(e["opportunity_id"] == "OS001" for e in plan["exclusions"])
+
+
+def test_a_workflow_plan_says_what_is_still_waiting_at_an_earlier_stage(cfg, db):
+    """Nothing here was excluded by the Planner. It is waiting for somebody."""
+    seed(db, cfg, n=4, headcount=200000)
+    stage(db, "OS000", "demand_tested")
+    for i in (1, 2):
+        stage(db, f"OS{i:03d}", "shortlisted")
+    stage(db, "OS003", "rejected")
+
+    plan = Planner(cfg, db).plan(PlanInputs(source="workflow"))
+    reasons = {e["opportunity_id"]: e["reason"] for e in plan["exclusions"]}
+    assert "Shortlisted" in reasons["OS001"]
+    assert "rejected" in reasons["OS003"]
+    assert "OS000" not in reasons
+
+
+def test_an_empty_board_fails_in_the_terms_of_the_mode_that_was_used(cfg, db):
+    """Telling a workflow user to loosen a confidence floor sends them to a
+    control that is not on their screen."""
+    seed(db, cfg, n=3)
+    for i in range(3):
+        stage(db, f"OS{i:03d}", "shortlisted")
+    with pytest.raises(ValueError) as exc:
+        Planner(cfg, db).plan(PlanInputs(source="workflow"))
+    assert "Demand-tested" in str(exc.value)
+    assert "workflow board" in str(exc.value)
+
+
+def test_the_two_sources_are_different_plans_not_the_same_one(cfg, db):
+    """The source is part of the fingerprint, so a workflow plan can never
+    overwrite the parameter plan it was compared against."""
+    seed(db, cfg, n=4, headcount=200000)
+    for i in range(4):
+        stage(db, f"OS{i:03d}", "demand_tested")
+    planner = Planner(cfg, db)
+    a = planner.plan(PlanInputs(label="same"))
+    b = planner.plan(PlanInputs(label="same", source="workflow"))
+    assert a["id"] != b["id"]
+    assert b["inputs"]["source"] == "workflow"
+
+
+def seed_horizon(db, *, prefix, n, horizon):
+    """Spaces on a different horizon, sharing the same capability pool."""
+    now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    with db.cursor() as cur:
+        for i in range(n):
+            tid = f"{prefix}{i:03d}"
+            cur.execute("""INSERT INTO opportunity_spaces
+                (id, version, vertical, use_case, technology, statement, domains, personas,
+                 geographies, state, horizon, first_seen, last_refresh, pipeline_version)
+                VALUES (?,1,'energy',?,'private_5g',?,'[]','[]','[]','active',?,?,?,'0.1.0')""",
+                (tid, f"{prefix}_use_case_{i}",
+                 f"A later-horizon statement long enough to look real, number {i}.",
+                 horizon, now, now))
+            cur.execute("""INSERT INTO market_sizes
+                (opportunity_id, computed_at, method, currency, som_low, som_base, som_high,
+                 confidence, factors, coverage, caveats, sizing_version, pipeline_version)
+                VALUES (?,?, 'bottom_up_adoption','EUR',1e7,5e7,1.5e8,'observed',
+                        '[]','{}','[]','v1','0.1.0')""", (tid, now))
+            cur.execute("""INSERT INTO opportunity_links
+                (opportunity_id, node_id, link_type, confidence, evidence, created_at)
+                VALUES (?,?,'L0',0.8,'{}',?)""", (tid, "capability_pool:test", now))
+
+
+def test_the_export_says_the_portfolio_was_not_selected_here(cfg, db, tmp_path):
+    """A reader who thinks an optimiser weighed the alternatives will read an
+    over-committed pool as a bug rather than as the finding it is."""
+    from radar.plan_report import PlanReportBuilder
+
+    seed(db, cfg, n=4, headcount=200000)
+    for i in range(4):
+        stage(db, f"OS{i:03d}", "demand_tested")
+    plan = Planner(cfg, db).plan(PlanInputs(label="Committed", source="workflow"))
+    text = _pdf_text(PlanReportBuilder(cfg, db, output_dir=tmp_path).build(plan)["path"])
+
+    assert "did not select anything" in text
+    assert "Demand-tested or beyond" in text
+    assert "Included from this stage onward" in text
+    # And the parameters that never applied must not appear as though they had.
+    assert "Maximum share in one vertical" not in text
+
+
+def test_a_committed_plan_can_be_written(cfg, db):
+    """The narrative path end to end on a workflow plan.
+
+    Every register the writer touches differs under this source — the system
+    prompt, the evidence block, the exclusions heading — and none of that is
+    exercised by building the plan. This test exists because one of them shadowed
+    the projection's mix with the stage mix and the whole step returned a 500.
+    """
+    seed(db, cfg, n=4, headcount=200000)
+    for i in range(4):
+        stage(db, f"OS{i:03d}", "demand_tested")
+    planner = Planner(cfg, db)
+    plan = planner.plan(PlanInputs(label="Committed narrative", source="workflow"))
+
+    from radar.pipeline.prompts import format_plan_for_narrative, plan_system_prompt
+
+    system = plan_system_prompt(cfg, source="workflow")
+    assert "NOT selected by an optimiser" in system
+    evidence = format_plan_for_narrative(plan)
+    assert "the collaboration workflow" in evidence
+    assert "Demand-tested 4" in evidence
+    # The portfolio shape still has to reach the writer; it is the only thing
+    # letting the prose describe the set qualitatively.
+    assert "by vertical:" in evidence
+
+    planner._llm = _FakeLLM({
+        "headline": "We will finish what the board has already started.",
+        "sections": {
+            "thesis": "The portfolio is what sales and presales have already carried past the "
+                      "demand gate, and the argument is that finishing it beats starting more.",
+            "risks": "Obtainable share remains a planning assumption rather than a forecast, and "
+                     "the pools carrying these commitments are the constraint on holding the "
+                     "schedule.",
+        },
+        "spaces_named": [s["opportunity_id"] for s in plan["selections"]],
+    })
+    out = planner.narrate(plan["id"])
+    assert out["narrative"]["sections"]["thesis"]
+    assert out["prompt_version"] == "plan-v2"
