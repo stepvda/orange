@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import datetime as dt
 import functools
+import re
 
 import pytest
 
@@ -72,20 +73,27 @@ class Scripted(LLMClient):
 
     Two prompts reach it, and they are told apart by the marker in the system
     prompt: the scoping turn itself, and the cheap second opinion on whether
-    retrieved evidence is about a brief. `support` defaults to supporting
-    nothing, so a test that does not care about it gets the strict answer.
+    retrieved evidence is about a brief.
+
+    `support` defaults to endorsing everything that was retrieved, which is the
+    ordinary case — the corpus is about the brief. A test that is specifically
+    about the gate REFUSING passes `support={"supporting": []}`, so the refusal
+    is stated in the test rather than inherited from a default.
     """
 
     def __init__(self, payload: dict, support: dict | None = None):
         super().__init__(provider="mock")
         self.payload = payload
-        self.support = support if support is not None else {"supporting": []}
+        self.support = support
         self.seen: list[tuple[str, str]] = []
 
     def complete_json(self, system: str, user: str, **kwargs):
         self.seen.append((system, user))
         if "MOCK_KIND=brief_support" in system:
-            return self.support
+            if self.support is not None:
+                return self.support
+            return {"supporting": re.findall(r"^\[(SIG-[^\]]+)\]", user, re.M),
+                    "note": "endorsed by default"}
         return self.payload
 
     @property
@@ -402,7 +410,7 @@ def test_a_retrieval_of_same_sector_documents_does_not_make_a_brief_runnable(cfg
     _seed_adjacent(db)
     service, _ = _service(cfg, db, _reply(ready=True, briefs=[_brief(
         description=_SIGNAGE, vertical="public_sector",
-        use_case="citizen_service_automation", technology="edge_computing")]))
+        use_case="citizen_service_automation", technology="edge_computing")]), support={"supporting": [], "note": "same sector, different subject"})
     out = service.reply([{"role": "user", "content": "digital signage on municipal street screens"}])
     brief = out["briefs"][0]
     assert brief["evidence"]["count"] > 0, "it retrieves — that was never the problem"
@@ -417,11 +425,11 @@ def test_the_refusal_names_the_gap_between_retrieved_and_supported(cfg, db):
     _seed_adjacent(db)
     service, _ = _service(cfg, db, _reply(ready=True, briefs=[_brief(
         description=_SIGNAGE, vertical="public_sector",
-        use_case="citizen_service_automation", technology="edge_computing")]))
+        use_case="citizen_service_automation", technology="edge_computing")]), support={"supporting": [], "note": "same sector, different subject"})
     problem = service.reply(
         [{"role": "user", "content": "digital signage on municipal street screens"}]
     )["briefs"][0]["problems"][0]
-    assert "is about its use case or its technology" in problem
+    assert "evidence for what it actually describes" in problem
     assert "critic would reject" in problem
 
 
@@ -441,7 +449,7 @@ def test_every_retrieved_signal_says_whether_it_supports_the_brief(cfg, db):
     _seed_adjacent(db)
     service, _ = _service(cfg, db, _reply(ready=True, briefs=[_brief(
         description=_SIGNAGE, vertical="public_sector",
-        use_case="citizen_service_automation", technology="edge_computing")]))
+        use_case="citizen_service_automation", technology="edge_computing")]), support={"supporting": [], "note": "same sector, different subject"})
     signals = service.reply(
         [{"role": "user", "content": "digital signage on municipal street screens"}]
     )["briefs"][0]["evidence"]["signals"]
@@ -480,15 +488,41 @@ def test_the_scoping_gate_reuses_the_rule_enrichment_already_states(cfg, db):
     assert reason and "appears in the signal text" in reason
 
 
-def test_the_vocabulary_test_answers_alone_when_it_can(cfg, db):
-    """It is free and, when it fires, right. Paying a model call to re-confirm
-    evidence that already carries the use case's own term is spending NFR-10's
-    reported quantity on a question already answered."""
+def test_matching_the_taxonomy_label_is_not_evidence_for_the_brief(cfg, db):
+    """The failure that reached a user, as a test.
+
+    The vocabularies are closed, so a proposal about advertising-funded municipal
+    screens is filed under the nearest available job and technology. Tenders for
+    private-5G video surveillance then corroborate `private_5g` perfectly while
+    being no evidence at all for advertising screens. The gate reported four
+    supporting signals, the button enabled, the run spent its calls, and the
+    critic threw the candidate out: "SIG-... is about video surveillance, neither
+    mentions public displays".
+
+    So the model is asked about the SENTENCE, and its answer overrules the label
+    match — here it endorses nothing, and the brief must not be runnable however
+    well the vocabulary agreed.
+    """
+    _seed(db)
+    service, llm = _service(cfg, db, _reply(ready=True, briefs=[_brief()]),
+                            support={"supporting": [], "note": "all about gearboxes, not this"})
+    out = service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}])
+    brief = out["briefs"][0]
+    assert llm.support_calls == 1, "asked on every proposed brief, not only when vocabulary fails"
+    assert brief["evidence"]["corroborated"] == 0, "the label match was overruled"
+    assert brief["runnable"] is False
+    assert brief["hypothesis"] is True, "and the contributed-evidence route opens instead"
+
+
+def test_the_support_call_is_told_the_brief_not_just_its_labels(cfg, db):
+    """It cannot overrule a label match unless it can see what the label
+    approximates."""
     _seed(db)
     service, llm = _service(cfg, db, _reply(ready=True, briefs=[_brief()]))
-    brief = service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}])["briefs"][0]
-    assert brief["evidence"]["support_method"] == "vocabulary"
-    assert llm.support_calls == 0
+    service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}])
+    system = next(sy for sy, _ in llm.seen if "MOCK_KIND=brief_support" in sy)
+    assert "Acoustic and vibration condition monitoring" in system, "the sentence"
+    assert "JUDGE AGAINST THE SENTENCE" in system
 
 
 def test_the_model_can_rescue_a_brief_the_vocabulary_test_would_refuse(cfg, db):
@@ -504,7 +538,7 @@ def test_the_model_can_rescue_a_brief_the_vocabulary_test_would_refuse(cfg, db):
     brief = service.reply(
         [{"role": "user", "content": "digital signage on municipal street screens"}]
     )["briefs"][0]
-    assert llm.support_calls == 1, "asked exactly once, about evidence that already retrieved"
+    assert llm.support_calls == 1, "asked once, about evidence that already retrieved"
     assert brief["evidence"]["support_method"] == "model"
     assert brief["evidence"]["corroborated"] >= 3
     assert brief["runnable"] is True

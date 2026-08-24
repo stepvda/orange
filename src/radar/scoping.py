@@ -329,7 +329,7 @@ class ScopingService:
             if not problems:
                 payload = synth.brief_payload(description, limit=_TURN_EVIDENCE,
                                               min_signals=self._min_signals)
-                reasons, method = self._support(triple, payload["signals"])
+                reasons, method = self._support(triple, description, payload["signals"])
                 evidence = {
                     "count": len(payload["signals"]),
                     "best": (payload["similarities"][0] if payload["similarities"] else None),
@@ -366,9 +366,10 @@ class ScopingService:
                     supported = evidence["corroborated"]
                     problems.append(
                         f"{evidence['count']} signal(s) read like this brief, but only "
-                        f"{supported} of them {'is' if supported == 1 else 'are'} about its use "
-                        f"case or its technology — the rest are the same sector and country and "
-                        f"nothing more. Synthesis would produce candidates whose claims cite them, "
+                        f"{supported} of them {'is' if supported == 1 else 'are'} evidence for "
+                        f"what it actually describes — the rest share its industry, its country or "
+                        f"its technology label while being about something else. Synthesis would "
+                        f"produce candidates whose claims cite them, "
                         f"and the critic would reject those claims for not being about this. "
                         f"Narrow to what the corpus actually evidences, or accept that this is a "
                         f"gap in it."
@@ -405,35 +406,46 @@ class ScopingService:
             })
         return checked
 
-    def _support(self, triple: tuple[str, str, str] | None,
+    def _support(self, triple: tuple[str, str, str] | None, description: str,
                  signals: list[dict[str, Any]]) -> tuple[list[str | None], str]:
         """Which retrieved signals actually bear on the brief, and how we know.
 
-        Two tests, cheapest first, because they fail in opposite directions.
+        THE MODEL DECIDES, AND IT IS ASKED ABOUT THE SENTENCE. That is a
+        correction of an earlier design that asked only about the taxonomy
+        triple, and it was wrong in a way worth recording, because the failure
+        was invisible until a run wasted its calls on it.
 
-        The vocabulary test is free and, when it fires, right — a signal whose
-        text carries the use case's own term is about the use case. What it is
-        not is complete. "CISA alerts on OT vulnerabilities after an attack on a
-        Polish utility damaged RTUs" is unmistakably about threat detection for
-        energy operators, and it will never contain the string "SIEM and SOAR";
-        journalism and tenders do not write in taxonomy ids. Gating on that alone
-        refuses real work, which is a worse failure than the one being fixed.
+        The vocabulary test — does the signal text carry the use case's or the
+        technology's own term — is free and precise about the LABEL. The label,
+        however, is routinely an approximation: the vocabularies are closed, so a
+        proposal about advertising-funded municipal screens gets filed under the
+        nearest available job and the nearest available technology. Tenders for
+        private-5G video surveillance then corroborate `private_5g` perfectly
+        while being no evidence at all for advertising screens. The gate reported
+        four supporting signals, the button enabled, the run spent four model
+        calls, and the critic threw the candidate out with exactly that reason:
+        "SIG-... is about video surveillance, neither mentions public displays".
 
-        So the model is asked only where the free test came up short, and only
-        about evidence that already cleared retrieval. That is one cheap call, on
-        the turn where somebody is about to spend a whole synthesis run — the
-        same trade §4.4.4 makes for the entailment check, for the same reason.
-        A provider failure here is not fatal: the vocabulary answer stands, and
-        the brief is judged on it rather than the turn being lost.
+        So the cheap model is now asked on every proposed brief, about the
+        brief's own sentence, and its answer is authoritative: a signal it does
+        not endorse does not count however well it matches the label. The
+        vocabulary reason is kept for display where the two agree, because
+        "technology term 'private 5g' appears in the signal text" is a more
+        checkable thing to show than a model's say-so.
+
+        One cheap call per proposed brief, on the turn where somebody is about to
+        spend a whole synthesis run — the same trade §4.4.4 makes for the
+        entailment check. A provider failure degrades to the vocabulary answer
+        rather than losing the turn.
         """
         reasons = self._corroboration(triple, signals)
-        if not triple or not signals or sum(1 for r in reasons if r) >= self._min_signals:
+        if not triple or not signals:
             return reasons, "vocabulary"
 
         vertical, use_case, technology = triple
         try:
             verdict = self._client().complete_json(
-                prompts.brief_support_prompt(vertical, use_case, technology),
+                prompts.brief_support_prompt(vertical, use_case, technology, description),
                 prompts.format_signals_for_support(signals),
                 temperature=0.0, max_tokens=600,
             )
@@ -446,7 +458,12 @@ class ScopingService:
         supporting = {str(i) for i in (verdict.get("supporting") or [])}
         note = str(verdict.get("note") or "").strip()[:200]
         merged = [
-            reason or (f"judged to be about this — {note}" if signal["id"] in supporting else None)
+            # Endorsed: show the concrete vocabulary reason if there is one,
+            # otherwise say the model vouched for it. Not endorsed: nothing, even
+            # if the label matched — that match is what this call exists to
+            # overrule.
+            ((reason or f"judged to be about this — {note}")
+             if signal["id"] in supporting else None)
             for reason, signal in zip(reasons, signals)
         ]
         return merged, "model"

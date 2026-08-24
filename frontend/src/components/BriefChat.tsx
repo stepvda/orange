@@ -180,7 +180,7 @@ function EvidenceRow({ signal }: { signal: ScopingSignal }) {
           can support nothing. */}
       {signal.corroborates !== undefined && (
         <span className={`chat-ev-support${signal.corroborates ? ' is-real' : ''}`}>
-          {signal.corroborates ?? 'similarity only — not about this use case or technology'}
+          {signal.corroborates ?? 'reads like it, but is not evidence for what this describes'}
         </span>
       )}
     </>
@@ -286,10 +286,11 @@ function BriefCard({ brief, index, text, selected, onText, onToggle, onOpenTopic
             <i>about</i> it. Support is a second, independent test — the signal's own words carry
             the use case or the technology, or its procurement codes do
             {brief.evidence.support_method === 'model'
-              ? ', and where that came up short a cheap model pass was asked about the same '
-                + 'documents. Journalism does not write in taxonomy ids, so refusing on the '
-                + 'vocabulary alone would turn down real work.'
-              : '. That was enough here, so nothing further was spent.'}
+              ? ' — and then a cheap model pass judged each one against this brief\'s own sentence '
+                + 'rather than its taxonomy labels. The labels come from closed lists, so a '
+                + 'proposal is routinely filed under the nearest available one; a tender that '
+                + 'matches that label while being about something else is not evidence for it.'
+              : '. The corpus could not be asked here.'}
           </p>
           <ul className="chat-ev-list">
             {brief.evidence.signals.map((signal) => (

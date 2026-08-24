@@ -805,7 +805,7 @@ def format_topic_for_competitor_analysis(topic: dict[str, Any], labels: dict[str
 # The Planner narrative
 # ---------------------------------------------------------------------------
 
-PROMPT_VERSION_PLAN = "plan-v1"
+PROMPT_VERSION_PLAN = "plan-v2"
 
 PLAN_SECTIONS = {
     "thesis": "The investment thesis in three or four sentences. What is the coherent bet "
@@ -824,21 +824,44 @@ PLAN_SECTIONS = {
 }
 
 
-def plan_system_prompt(cfg: Config) -> str:
+def plan_system_prompt(cfg: Config, source: str = "parameters") -> str:
     """Write the business plan for a computed portfolio.
 
     Every figure on the page was computed before this prompt ran. The model's
     job is to explain a plan, not to produce one — so the numeric guard is
     absolute here, more than anywhere else in the product: a plan that contradicts
     its own projection table is worse than a plan with no prose at all.
+
+    WHO CHOSE THE SET changes what the prose can honestly claim. A plan built
+    from parameters is an optimiser's answer, and its argument is the constraints
+    that bound. A plan built from the workflow is a set of human decisions
+    already taken, and describing it as though an optimiser weighed the
+    alternatives would attribute a judgement nobody made.
     """
     sections = "\n".join(f"  - {name}: {guide}" for name, guide in PLAN_SECTIONS.items())
+    if source == "workflow":
+        origin = """The portfolio was NOT selected by an optimiser. It is every opportunity space
+that Orange's own collaboration workflow has moved past a stage gate — a set of
+decisions taken by strategists, sales and presales, one space at a time. The
+Planner scheduled that set across the plan window and computed the projection;
+it chose nothing and rejected nothing.
+
+So: do not write as though alternatives were weighed here. The argument is what
+the business has already committed to and what that commitment implies —
+when each space can start, which capability pools it commits, and where the
+commitment exceeds what those pools can staff. Where a computed warning says the
+set is over-committed or unsized, that is the most important thing on the page
+and `risks` must carry it."""
+    else:
+        origin = """The portfolio has ALREADY BEEN SELECTED and the projection ALREADY COMPUTED by an
+optimiser. You are explaining a decision, not making one."""
+
     return f"""{orange_context_block(cfg)}
 
 YOUR TASK
-Write the narrative of a five-year business plan for Orange Business. The
-portfolio has ALREADY BEEN SELECTED and the projection ALREADY COMPUTED by an
-optimiser. You are explaining a decision, not making one.
+Write the narrative of a five-year business plan for Orange Business.
+
+{origin}
 
 The audience is an Orange Business executive committee. They will ask where every
 number came from, and the answer has to be "the model computed it", never "the
@@ -860,8 +883,9 @@ ABSOLUTE RULES — a violation drops the section
 3. ONLY SUPPLIED ORANGE ASSETS. Offers, certifications, partners and capability
    pools only as supplied. Never a customer name.
 4. THE CONSTRAINTS ARE THE ARGUMENT. This plan is shaped by what bound it —
-   capability capacity, entry slots, concentration caps. Say so. A plan that reads
-   as though everything desirable was chosen is not describing an optimiser's output.
+   capability capacity, entry slots, concentration caps, or the stage gate that
+   admitted each space. Say so. A plan that reads as though everything desirable
+   was chosen is not describing what actually produced this set.
 5. CONCEDE THE UNCERTAINTY. The projection rests on declared assumption bands and
    on obtainable-share figures that are planning assumptions rather than forecasts.
    The `risks` section must say this in plain words.
@@ -882,13 +906,30 @@ def format_plan_for_narrative(plan: dict[str, Any]) -> str:
     """The computed plan, as the evidence block for its own narrative."""
     proj = plan.get("projection") or {}
     mix = proj.get("mix") or {}
-    lines = [
-        f"PLAN {plan['id']} — {plan.get('label')}",
-        f"Objective: {plan.get('objective')} over {plan.get('plan_years')} years",
-        f"Selected {plan.get('selected_count')} spaces from {plan.get('considered_count')} admissible candidates.",
-        "",
-        "PORTFOLIO SHAPE (shares, for your qualitative description only)",
-    ]
+    inputs = plan.get("inputs") or {}
+    cap = plan.get("capacity_usage") or {}
+    if inputs.get("source") == "workflow":
+        lines = [
+            f"PLAN {plan['id']} — {plan.get('label')}",
+            f"Source: the collaboration workflow. Every space at stage "
+            f"'{inputs.get('from_stage')}' or beyond is in this plan; nothing was selected "
+            f"or rejected here. Window: {plan.get('plan_years')} years.",
+            f"{plan.get('selected_count')} committed spaces, scheduled by horizon and by how "
+            f"many new spaces can be started in a year.",
+        ]
+        mix = cap.get("stage_mix") or []
+        if mix:
+            lines.append("Where they stand on the gate: " + ", ".join(
+                f"{m['label']} {m['count']}" for m in mix))
+        lines += ["", "PORTFOLIO SHAPE (shares, for your qualitative description only)"]
+    else:
+        lines = [
+            f"PLAN {plan['id']} — {plan.get('label')}",
+            f"Objective: {plan.get('objective')} over {plan.get('plan_years')} years",
+            f"Selected {plan.get('selected_count')} spaces from {plan.get('considered_count')} admissible candidates.",
+            "",
+            "PORTFOLIO SHAPE (shares, for your qualitative description only)",
+        ]
     for key in ("vertical", "horizon", "distance"):
         entries = mix.get(key) or []
         if entries:
@@ -906,7 +947,6 @@ def format_plan_for_narrative(plan: dict[str, Any]) -> str:
             lines.append(f"       {s['vertical']} · L{s['portfolio_distance']} · "
                          f"{s['horizon']} · pool: {s.get('pool') or 'unassigned'}")
 
-    cap = plan.get("capacity_usage") or {}
     lines += ["", "CAPABILITY POOLS COMMITTED (utilisation as a share, for description)"]
     for pool, data in (cap.get("pools") or {}).items():
         util = data.get("peak_utilisation")
@@ -923,7 +963,11 @@ def format_plan_for_narrative(plan: dict[str, Any]) -> str:
 
     exc = plan.get("exclusions") or []
     if exc:
-        lines += ["", "NOTABLE EXCLUSIONS — for the `not_doing` section:"]
+        lines += ["", ("NOT IN THIS PLAN — waiting for a decision on the workflow board, stopped "
+                       "there, or unsized. Nothing here was rejected by the Planner; say so in "
+                       "`not_doing`:")
+                  if inputs.get("source") == "workflow" else
+                  "NOTABLE EXCLUSIONS — for the `not_doing` section:"]
         for e in exc[:8]:
             lines.append(f"  [{e['opportunity_id']}] {e['statement'][:90]} — {e['reason']}")
 
@@ -1302,7 +1346,8 @@ OUTPUT — a single JSON object, nothing else:
 carries everything established so far in the conversation, not just this turn."""
 
 
-def brief_support_prompt(vertical: str, use_case: str, technology: str) -> str:
+def brief_support_prompt(vertical: str, use_case: str, technology: str,
+                         description: str) -> str:
     """Does this retrieved evidence actually support a space on this triple?
 
     The gate in `radar.scoping` asks a lexical question first — does the signal
@@ -1322,17 +1367,32 @@ def brief_support_prompt(vertical: str, use_case: str, technology: str) -> str:
 You decide which of several documents genuinely bear on a proposed business
 opportunity. You are a filter, not an author.
 
-THE PROPOSAL
+THE PROPOSAL, IN THE WORDS THAT MATTER
+  {description}
+
+Its taxonomy labels, which are an APPROXIMATION and not the proposal itself:
   Industry:   {vertical}
   The job:    {use_case}
   Deployed:   {technology}
 
-A document SUPPORTS the proposal when a reader would agree it is evidence about
-that job or that technology — in that industry or in one close enough to carry
-over. It does not have to use the same words.
+JUDGE AGAINST THE SENTENCE, NOT THE LABELS. This is the whole point of asking
+you. The labels come from a closed list of fifteen industries, fifty-nine jobs
+and thirty-odd technologies, so a proposal regularly gets filed under the
+nearest one rather than an exact one — and a document that matches the LABEL
+while missing the SENTENCE is precisely the trap. A tender for private-5G video
+surveillance shares the technology label with a proposal about advertising
+screens and is no evidence for it whatsoever. If you find yourself reasoning
+"well, it is the same technology", stop: that is a no.
+
+A document SUPPORTS the proposal when a reader would agree it is evidence for
+the thing the sentence describes — the same job being done, or the same thing
+being bought, or the same problem being had. It does not have to use the same
+words.
 
 A document DOES NOT SUPPORT the proposal when it is merely:
   * the same industry, country or buyer, doing something else;
+  * the same TECHNOLOGY deployed for a different purpose;
+  * the same taxonomy label attached to a different activity;
   * the same broad field ("digital", "cloud", "IT services") with no bearing on
     this job;
   * a general research or opinion piece with nothing specific to this.
