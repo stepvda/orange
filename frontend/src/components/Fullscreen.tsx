@@ -40,10 +40,14 @@ interface Props {
   onHelp: (topic: string) => void
   onExplain: (topic: Topic) => void
   onClose: () => void
+  /** Passed through to the detail pane. Full screen shows ONE space, so when it
+   *  is deleted this screen has nothing left to display — App closes it. */
+  onDeleted?: (topicId: string) => void
 }
 
 export default function SpaceFullscreen({
   topic, topicId, role, meta, workflowMeta, refreshKey, rank, onChanged, onHelp, onExplain, onClose,
+  onDeleted,
 }: Props) {
   const [pane, setPane] = useState<Pane>('space')
   const closeRef = useRef<HTMLButtonElement | null>(null)
@@ -137,6 +141,7 @@ export default function SpaceFullscreen({
                          refreshKey={refreshKey}
                          onHelp={onHelp}
                          onExplain={onExplain}
+                         onDeleted={onDeleted}
                          onOpenBrief={() => setPane('brief')}
                          rank={rank} />
           </div>

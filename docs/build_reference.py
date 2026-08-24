@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 DB = ROOT / "data" / "radar.db"
 
 ROUTE_GROUPS = [
+    ("Signing in", lambda p: p.startswith("/api/auth")),
     ("Meta and health", lambda p: p in ("/api/meta", "/api/health", "/healthz", "/api/refreshes")),
     ("The main read", lambda p: p.startswith(("/api/view", "/api/whitespace", "/api/orphan", "/api/coverage"))),
     ("One topic", lambda p: p.startswith("/api/topics/")),
@@ -63,9 +64,11 @@ PURPOSE = {
     "assessments": ("Collaboration", "One role's rating of its own axis, superseded rather than deleted (§4.10 model C)."),
     "feedback": ("Collaboration", "Ratings, comparisons, overrides and engagement, with the exposure context (DR-15, §4.7.6)."),
     "internal_signals": ("Collaboration", "Customer conversations, RFP themes and lost deals — inert until moderated (FR-24, §2.5)."),
+    "users": ("Access", "Who may sign in. A username and a PBKDF2 verifier — never a password, and no personal data beyond what deciding access needs (DR-09)."),
+    "sessions": ("Access", "Live sign-ins, keyed by the SHA-256 of the cookie value. A copy of the database file therefore grants no logins."),
 }
 GROUP_ORDER = ["Core", "Discovery", "Business graph", "Qualification",
-               "Competitor intel", "Output", "Planner", "Collaboration", "Other"]
+               "Competitor intel", "Output", "Planner", "Collaboration", "Access", "Other"]
 
 #: (table, column) -> why it was added. The list itself is read from
 #: `db.MIGRATIONS`, so a migration cannot be applied without appearing here.
@@ -140,14 +143,24 @@ reads repeated keys as a list.
 client-side route survives a reload. The cost is that an `/api` path the *server*
 does not know answers `200 text/html`, which the frontend detects and reports as
 "the running server is older than the bundle it is serving" — the usual cause.
+
+**Every `/api` path needs a session** except the three under `/api/auth`. The
+session is an `HttpOnly`, `SameSite=Lax` cookie issued by `POST /api/auth/login`
+and checked by an application-level dependency, so a route cannot be added
+without inheriting the guard. The built bundle and `/healthz` are deliberately
+open — the login screen has to load before anyone can sign in, and a liveness
+probe that answers `401` makes every deployment look unhealthy.
 {chr(10).join(body)}
 
 ## Errors
 
 | Status | Meaning |
 |---|---|
+| `401` | No valid session — or, from `/api/auth/login`, a credential that does not match an account. The two are worded identically on purpose. |
+| `403` | Signed in, but the current password given for a password change was wrong. |
 | `404` | No such topic, competitor or artefact. |
 | `409` | Well-formed, but the precondition is absent — asking for a competitor comparison on a space with no competitive assessment, for instance. |
+| `429` | Too many failed sign-ins on one account. It reopens by itself. |
 | `503` | The serving instance could not open its database. It starts and says so rather than crash-looping (see `bootstrap.py`). |
 """)
     print(f"  API.md            {len(rows)} endpoints")

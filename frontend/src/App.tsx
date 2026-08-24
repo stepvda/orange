@@ -10,9 +10,11 @@ import GenerateScreen from './components/Generate'
 import SpaceFullscreen from './components/Fullscreen'
 import PlannerScreen from './components/Planner'
 import ScoreExplainModal from './components/ScoreExplain'
+import { LoginScreen, PasswordDialog } from './components/Login'
+import { useAnnounce } from './components/Announcer'
 import { formatEur } from './components/MarketSize'
-import { api } from './api'
-import type { Coverage, FilterState, Meta, RadarView, SortId, Topic } from './types'
+import { api, setSessionEndedHandler } from './api'
+import type { Coverage, FilterState, Meta, RadarView, SessionInfo, SortId, Topic, User } from './types'
 import { EMPTY_FILTERS } from './types'
 
 type Tab = 'radar' | 'list' | 'brief' | 'detail' | 'workflow' | 'analytics' | 'whitespace' | 'coverage'
@@ -135,7 +137,24 @@ function ShowMore({ view, limit, setLimit }: {
   )
 }
 
-export default function App() {
+interface RadarProps {
+  user: User
+  minPasswordLength: number
+  onSignedOut: () => void
+  onUserChanged: (user: User) => void
+}
+
+/** The radar itself, mounted only once there is a session behind it.
+ *
+ * Splitting this out of the sign-in gate is not tidiness. Every screen in here
+ * opens by fetching — meta, the view, the workflow board — and mounting it for a
+ * signed-out visitor would fire a dozen requests that all answer 401, painting
+ * the error state of eight panels behind a login form. Not rendering it until
+ * there is a session means the first request it makes is one that can succeed,
+ * and signing out unmounts it, which discards the data with the session rather
+ * than leaving it on screen.
+ */
+function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: RadarProps) {
   const initial = useMemo(initialFromUrl, [])
   const [meta, setMeta] = useState<Meta | null>(null)
   const [role, setRole] = useState(initial.role ?? 'strategist')
@@ -181,6 +200,11 @@ export default function App() {
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null)
   const [layout, setLayout] = useState(loadLayout)
   const [dragging, setDragging] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
+  // Named rather than counted: after a delete the space is gone from every pane
+  // at once, and "OS041 deleted" is the only thing left that says which one.
+  const [deleted, setDeleted] = useState<string | null>(null)
+  const announce = useAnnounce()
   const detailHidden = layout.detailHidden ?? false
   const layoutRef = useRef<HTMLDivElement | null>(null)
   // The detail pane is hidden by the responsive rules below 1080px — which is
@@ -389,6 +413,24 @@ export default function App() {
     if (compact) setTab('detail')
   }, [compact])
 
+  /** A space has just been removed.
+   *
+   * Everything on screen that referenced it is now referencing something that
+   * does not exist — the selection, the detail pane, full screen, and the view
+   * the row was drawn from. All four are cleared here rather than left to
+   * discover the 404 separately, which is what produced "Could not load OS041"
+   * in three panes at once.
+   */
+  const onTopicDeleted = useCallback((id: string) => {
+    setSelected((current) => (current === id ? null : current))
+    setSelectedTopic(null)
+    setFullscreen(false)
+    setExplaining((current) => (current?.id === id ? null : current))
+    setDeleted(id)
+    setRefreshKey((k) => k + 1)
+    announce(`Opportunity space ${id} deleted.`)
+  }, [announce])
+
   /** Order control.
    *
    * The blocker it fixes: the five largest sized opportunities in the radar were
@@ -483,7 +525,38 @@ export default function App() {
                 title="Theme">
           {theme === 'auto' ? '◐' : theme === 'dark' ? '☾' : '☀'}
         </button>
+
+        {/* Two controls rather than a menu. A dropdown here would need
+            outside-click handling, focus return and an escape key for two
+            items, and one of those two is the one people look for when they are
+            already annoyed. */}
+        <button className="meta-chip account-chip" onClick={() => setChangingPassword(true)}
+                title={`Signed in as ${user.username} — change password`}>
+          {user.display_name}
+          {user.must_change_password && <span className="account-warn" aria-hidden>!</span>}
+        </button>
+        <button className="signout-btn" onClick={onSignedOut} title="End this session">
+          Sign out
+        </button>
       </header>
+
+      {user.must_change_password && (
+        <div className="default-password-banner" role="status">
+          <span aria-hidden>⚠</span>
+          <span>
+            <b>This account still has the password the radar shipped with.</b> Anyone who knows
+            the default can read every space, every competitor assessment and every plan in here.
+          </span>
+          <button onClick={() => setChangingPassword(true)}>Change it now</button>
+        </div>
+      )}
+
+      {deleted && (
+        <div className="deleted-banner" role="status">
+          <span><b>{deleted}</b> and everything attached to it has been deleted.</span>
+          <button onClick={() => setDeleted(null)} aria-label="Dismiss">Dismiss</button>
+        </div>
+      )}
 
       {generating && (
         <GenerateScreen
@@ -519,6 +592,7 @@ export default function App() {
           onChanged={() => setRefreshKey((k) => k + 1)}
           onHelp={setHelp}
           onExplain={setExplaining}
+          onDeleted={onTopicDeleted}
           onClose={() => {
             // Leaving destroys the control that was focused, so focus goes back
             // to the button that opened it rather than to <body>.
@@ -745,6 +819,7 @@ export default function App() {
                              refreshKey={refreshKey}
                              onHelp={setHelp}
                              onExplain={setExplaining}
+                             onDeleted={onTopicDeleted}
                              onOpenBrief={(id) => { setSelected(id); setTab('brief') }}
                              rank={selectedRank >= 0 ? selectedRank + 1 : undefined} />
               </div>
@@ -1112,10 +1187,17 @@ export default function App() {
                        refreshKey={refreshKey}
                        onHelp={setHelp}
                        onExplain={setExplaining}
+                       onDeleted={onTopicDeleted}
                        onOpenBrief={(id) => { setSelected(id); setTab('brief') }}
                        rank={selectedRank >= 0 ? selectedRank + 1 : undefined} />
         </aside>
       </div>
+
+      {changingPassword && (
+        <PasswordDialog user={user} minLength={minPasswordLength}
+                        onClose={() => setChangingPassword(false)}
+                        onChanged={onUserChanged} />
+      )}
 
       <HelpModal topic={help} onClose={() => setHelp(null)} />
       <ScoreExplainModal
@@ -1123,5 +1205,76 @@ export default function App() {
         weights={{ attractiveness: meta.attractiveness_weights, right_to_win: meta.right_to_win_weights }}
         onClose={() => setExplaining(null)} />
     </div>
+  )
+}
+
+
+/** The sign-in gate, and the only thing rendered before there is a session.
+ *
+ * Three states, and they are genuinely different messages: still asking,
+ * cannot ask at all, and asked and got "nobody". The middle one used to be
+ * folded into the third — a backend that was down showed a login form, and the
+ * password that would not work looked like the user's fault.
+ */
+export default function App() {
+  const [session, setSession] = useState<SessionInfo | null>(null)
+  const [checking, setChecking] = useState(true)
+  const [unreachable, setUnreachable] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.session()
+      .then((info) => { if (!cancelled) { setSession(info); setUnreachable(null) } })
+      .catch((exc) => { if (!cancelled) setUnreachable(String(exc.message ?? exc)) })
+      .finally(() => { if (!cancelled) setChecking(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  // A 401 from anywhere in the app means the session ended underneath it —
+  // expired, or signed out in another tab. Handled once, here, rather than by
+  // each panel rendering "your session has ended" as if it were a data error.
+  useEffect(() => {
+    setSessionEndedHandler(() => {
+      setSession((current) => (current ? { ...current, authenticated: false, user: null } : current))
+    })
+    return () => setSessionEndedHandler(null)
+  }, [])
+
+  if (checking) return <div className="empty">Loading…</div>
+
+  if (unreachable) {
+    return (
+      <div className="empty">
+        <p>Cannot reach the radar API.</p>
+        <p style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{unreachable}</p>
+        <p>Start it with <code>radar serve</code> (or <code>python -m radar.cli serve</code>).</p>
+      </div>
+    )
+  }
+
+  if (!session?.authenticated || !session.user) {
+    return (
+      <LoginScreen
+        onSignedIn={(user) => setSession((current) => ({
+          authenticated: true,
+          user,
+          password_policy: current?.password_policy ?? { min_length: 8 },
+        }))} />
+    )
+  }
+
+  return (
+    <RadarApp
+      user={session.user}
+      minPasswordLength={session.password_policy?.min_length ?? 8}
+      onUserChanged={(user) => setSession((current) => (current ? { ...current, user } : current))}
+      onSignedOut={() => {
+        // Cleared locally whatever the server says. A network failure on the way
+        // out must not leave somebody looking at a radar they asked to leave —
+        // and the cookie is HttpOnly, so the only thing this can do is stop
+        // rendering the data it already has.
+        api.logout().catch(() => {})
+        setSession((current) => (current ? { ...current, authenticated: false, user: null } : current))
+      }} />
   )
 }

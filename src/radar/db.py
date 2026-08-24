@@ -620,6 +620,52 @@ CREATE TABLE IF NOT EXISTS topic_competitor_analysis (
     model_version   TEXT,
     pipeline_version TEXT NOT NULL
 );
+
+-- ---------------------------------------------------------------------------
+-- Access control.
+--
+-- The radar is not public. Everything above is competitive analysis of named
+-- companies, Orange's own asset graph, and market estimates with the workings
+-- attached — none of which should be readable by whoever finds the URL. These
+-- two tables are what `radar.auth` puts in front of the API.
+--
+-- DR-09 ("no personal data beyond the strictly necessary") is why they are this
+-- thin. A user is a name to sign in with and a verifier; a session is a hash, an
+-- owner and two timestamps. No email, no address, no agent string: none of it is
+-- needed to decide whether this request may read the radar, and storing it would
+-- make a breach worse for no gain.
+--
+-- Neither column holds anything replayable. `password_hash` is a PBKDF2
+-- verifier, and `token_hash` is the SHA-256 of a token that only ever existed in
+-- the cookie — so a copy of this file grants no logins, which matters
+-- disproportionately for a SQLite deployment where the database IS a file
+-- somebody can walk off with.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+    username        TEXT PRIMARY KEY,          -- lower-cased at the door, so 'Orange' and 'orange' are one account
+    password_hash   TEXT NOT NULL,             -- pbkdf2_sha256$<iterations>$<salt>$<hash>; never a password
+    display_name    TEXT,
+    created_at      TEXT NOT NULL,
+    password_changed_at TEXT NOT NULL,
+    -- Set on the seeded account, cleared by the first real password change. The
+    -- interface reads it to say, on every screen, that the shipped credential is
+    -- still in place — a default password nobody is reminded about is a default
+    -- password forever.
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    last_login_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash      TEXT PRIMARY KEY,          -- sha256 of the cookie value; the value itself is never stored
+    username        TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+    created_at      TEXT NOT NULL,
+    last_seen_at    TEXT NOT NULL,
+    -- Absolute, not idle: a session is refreshed on use up to a ceiling, so a
+    -- tab left open for a week still has to sign in again.
+    expires_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(username);
+CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
 """
 
 #: Columns added after the first release. SQLite's CREATE TABLE IF NOT EXISTS

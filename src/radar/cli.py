@@ -11,6 +11,8 @@
     radar whitespace            high attractiveness, no portfolio path (FR-32)
     radar orphan-offers         offers with no live topic (FR-33)
     radar confirm-link          curator confirmation of a link pattern (LK-06)
+    radar user                  accounts for the web interface
+    radar delete-space OS001    remove a space and everything attached to it
     radar reference-data        fetch Eurostat sizing denominators (§4.3.4)
     radar size                  compute market size per opportunity space (§4.3.4)
     radar competition           assess competitive intensity per space (§4.3.3)
@@ -185,6 +187,31 @@ def main(argv: list[str] | None = None) -> int:
     brief.add_argument("topic_id", nargs="?", default=None)
     brief.add_argument("--all", action="store_true", help="Every topic that has a description")
     brief.add_argument("--open", action="store_true", help="Open the PDF when it is written")
+
+    # Accounts. The web interface can change a password but not create the
+    # second account, and it should not be able to: handing the running app the
+    # power to mint logins turns any session hijack into a permanent one.
+    user = sub.add_parser("user", help="Manage the accounts that can sign in to the web interface")
+    user_sub = user.add_subparsers(dest="user_command", required=True)
+    user_sub.add_parser("list", help="Accounts, when they last signed in, and which still hold the shipped password")
+    user_add = user_sub.add_parser("add", help="Create an account")
+    user_add.add_argument("username")
+    user_add.add_argument("--password", default=None,
+                          help="Omit to be prompted, which keeps it out of the shell history")
+    user_add.add_argument("--name", default=None, help="Display name")
+    user_pw = user_sub.add_parser("passwd", help="Change an account's password (ends its sessions)")
+    user_pw.add_argument("username")
+    user_pw.add_argument("--password", default=None, help="Omit to be prompted")
+    user_rm = user_sub.add_parser("remove", help="Delete an account and its sessions")
+    user_rm.add_argument("username")
+    user_out = user_sub.add_parser("signout", help="End every session an account holds")
+    user_out.add_argument("username")
+
+    delete_space = sub.add_parser(
+        "delete-space", help="Remove an opportunity space and every row attached to it")
+    delete_space.add_argument("topic_id")
+    delete_space.add_argument("--yes", action="store_true",
+                              help="Skip the confirmation prompt")
 
     serve = sub.add_parser("serve", help="Run the read API")
     serve.add_argument("--host", default="127.0.0.1")
@@ -572,6 +599,90 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(f"Recorded: {args.pattern} -> {args.decision} by {args.curator}")
         print("Re-run `radar refresh --stages link` to apply it to existing topics.")
+        return 0
+
+    if args.command == "user":
+        from . import auth as auth_mod
+        db.init_schema()
+        service = auth_mod.AuthService(db)
+        service.ensure_seed_user()
+
+        def _ask(prompt: str) -> str:
+            import getpass
+            first = getpass.getpass(f"{prompt}: ")
+            if first != getpass.getpass("Repeat: "):
+                raise auth_mod.AuthError("The two entries do not match.")
+            return first
+
+        try:
+            if args.user_command == "list":
+                rows = service.list_users()
+                print(f"{'USERNAME':<20} {'LAST SIGN-IN':<22} {'PASSWORD CHANGED':<22} NOTE")
+                for row in rows:
+                    note = "SHIPPED DEFAULT — change it" if row["must_change_password"] else ""
+                    print(f"{row['username']:<20} {(row['last_login_at'] or 'never'):<22} "
+                          f"{row['password_changed_at']:<22} {note}")
+                print(f"\n{len(rows)} account(s)")
+                return 0
+
+            if args.user_command == "add":
+                password = args.password or _ask(f"Password for {args.username}")
+                created = service.create_user(args.username, password, display_name=args.name)
+                print(f"Created {created['username']}")
+                return 0
+
+            if args.user_command == "passwd":
+                password = args.password or _ask(f"New password for {args.username}")
+                service.set_password(args.username, password)
+                print(f"Password changed for {args.username}; its sessions have been ended.")
+                return 0
+
+            if args.user_command == "remove":
+                if service.delete_user(args.username):
+                    print(f"Removed {args.username}")
+                    return 0
+                print(f"No account called {args.username}")
+                return 1
+
+            if args.user_command == "signout":
+                ended = service.logout_everywhere(args.username)
+                print(f"Ended {ended} session(s) for {args.username}")
+                return 0
+        except auth_mod.AuthError as exc:
+            print(f"Refused: {exc}")
+            return 1
+        return 1
+
+    if args.command == "delete-space":
+        from . import deletion
+        try:
+            impact = deletion.deletion_impact(db, args.topic_id)
+        except deletion.TopicNotFound:
+            print(f"No such opportunity space: {args.topic_id}")
+            return 1
+
+        print(f"\n{args.topic_id}  {impact['statement']}")
+        print(f"  {impact['triple']['vertical']} x {impact['triple']['use_case']} x "
+              f"{impact['triple']['technology']}  [{impact['state']}]")
+        for entry in impact["removes"]:
+            print(f"  - {entry['count']:>4} {entry['label']}")
+        if impact["merged_duplicates"]:
+            print(f"  - also the duplicates folded into it: "
+                  f"{', '.join(impact['merged_duplicates'])}")
+        for plan in {p["id"]: p for p in impact["plans"]}.values():
+            print(f"  ! plan {plan['id']} ({plan['label'] or 'unlabelled'}) selected this space; "
+                  f"its stored projection will no longer add up")
+        print(f"  = {impact['signals_kept']} signals stay — evidence is shared, "
+              f"only the attachment goes")
+
+        if not args.yes:
+            if input("\nDelete it? [y/N] ").strip().lower() not in {"y", "yes"}:
+                print("Left alone.")
+                return 1
+        report = deletion.delete_topic(db, args.topic_id)
+        print(f"Deleted {args.topic_id} ({report['brief_files_removed']} brief file(s) removed).")
+        print("Note: identity is the taxonomy triple (DR-03), so a later refresh that finds the "
+              "same triple in the evidence will synthesise this space again.")
         return 0
 
     if args.command == "serve":

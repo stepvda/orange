@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import ConfirmDelete from './ConfirmDelete'
 import type { Meta, Topic } from '../types'
 import ScoreBreakdown from './ScoreBreakdown'
 import { EvidenceTimeline } from './Charts'
@@ -36,6 +37,11 @@ interface Props {
   refreshKey?: number
   onHelp?: (topic: string) => void
   onExplain?: (topic: Topic) => void
+  /** Set by the surfaces that can survive the space disappearing — they have to
+   *  clear the selection and re-read the view. Omitted, the remove control does
+   *  not render at all: a delete button whose caller cannot handle the delete
+   *  leaves the reader looking at a space that is no longer there. */
+  onDeleted?: (topicId: string) => void
 }
 
 /** The pane answers the user's questions in the order §4.9 puts them, which is
@@ -101,19 +107,21 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: 'sources', label: 'Sources' },
 ]
 
-export default function TopicDetail({ topicId, role, meta, rank, workflowMeta, onChanged, refreshKey, onHelp, onExplain, onOpenBrief }: Props) {
+export default function TopicDetail({ topicId, role, meta, rank, workflowMeta, onChanged, refreshKey, onHelp, onExplain, onOpenBrief, onDeleted }: Props) {
   const [topic, setTopic] = useState<Topic | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [rated, setRated] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<{ month: string; n: number }[]>([])
   const [localKey, setLocalKey] = useState(0)
   const [showAllClaims, setShowAllClaims] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
     setTopic(null)
     setError(null)
     setRated(null)
     setTimeline([])
+    setConfirmingDelete(false)
     if (!topicId) return
     api.topic(topicId).then(setTopic).catch((e) => setError(String(e)))
     fetch(`/api/topics/${topicId}/evidence-timeline`)
@@ -570,6 +578,37 @@ export default function TopicDetail({ topicId, role, meta, rank, workflowMeta, o
         v{topic.version} · first seen {topic.first_seen} · refreshed {topic.last_refresh}<br />
         pipeline {topic.provenance.pipeline_version} · prompt {topic.provenance.prompt_version} · model {topic.provenance.model_version}
       </div>
+
+      {/* --- removing the space ---
+          Last, and behind its own rule. Every other control on this pane is
+          reversible — regenerate a description, move a stage, rate a topic — and
+          this one is not, so it does not sit among them where a mis-click lands
+          on it. The dialog behind the button is where the consequence is
+          actually spelled out. */}
+      {onDeleted && (
+        <div className="danger-zone">
+          <div>
+            <h4>Remove this space</h4>
+            <p>
+              Deletes {topic.id} and everything attached to it — evidence links, scores, asset
+              links, assessments, stage history, sizing, the description and the brief. The
+              signals themselves are shared, and stay. You will be shown the full list before
+              anything happens.
+            </p>
+          </div>
+          <button className="danger-btn" onClick={() => setConfirmingDelete(true)}>
+            Delete space…
+          </button>
+        </div>
+      )}
+
+      {confirmingDelete && onDeleted && (
+        <ConfirmDelete
+          topicId={topic.id}
+          statement={topic.statement}
+          onCancel={() => setConfirmingDelete(false)}
+          onDeleted={(id) => { setConfirmingDelete(false); onDeleted(id) }} />
+      )}
     </div>
   )
 }
