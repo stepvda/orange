@@ -569,7 +569,8 @@ def test_a_padded_brief_is_measured_after_normalisation(cfg, db):
     _seed_clusters(db, embed=True)
     padded = "  Acoustic   gearbox   monitoring   for   offshore   wind   operators.   "
     job = _await(GenerationService(cfg, db).start_from_brief(padded))
-    assert job.brief == "Acoustic gearbox monitoring for offshore wind operators."
+    assert job.briefs == ["Acoustic gearbox monitoring for offshore wind operators."]
+    assert job.as_dict()["brief"] == "Acoustic gearbox monitoring for offshore wind operators."
 
 
 def test_two_runs_cannot_proceed_at_once(cfg, db):

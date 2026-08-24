@@ -6,6 +6,74 @@ features that exposed them.
 
 ---
 
+## A scoping assistant on the Generate screen
+
+**Changed.** The free-text box at the bottom of the Generate screen ("Or
+describe one opportunity space") is now a conversation, selected from a tab
+beside the grid form. The box asked for one thing and gave one piece of
+feedback — a character count, which is the only failure that did not matter. An
+opportunity space is a vertical × use case × technology plus a buyer's problem
+and a place, and somebody who knows their market but not the taxonomy
+under-specified two of those every time. They found out minutes later, from a
+run that created nothing.
+
+* **The assistant reads the corpus while you talk.** Every turn re-retrieves
+  from the whole transcript against the same signal vectors the run will read,
+  at the same similarity floor, and what came back is shown beside the
+  conversation with publisher, date and cosine. It is also given the
+  theme-cluster map, the geography and signal-type distribution, and the
+  taxonomy cells already occupied — so it asks about the geography the evidence
+  is actually in rather than asking which geography.
+* **It interviews in a fixed order.** The three slots that *are* the space
+  first, then the buyer's problem, geography, buyer and deal shape — ranked by
+  how much each changes retrieval. The questions are configuration
+  (`prompts.SCOPING_SLOTS`), reviewable as a set the way the vocabularies are.
+* **The button is enabled by the corpus, not by the model.** Every brief the
+  assistant proposes is put back through the retrieval the job will perform. One
+  that returns nothing above the floor is shown with the reason and cannot be
+  selected. Asked whether it has enough, a model says yes; where the two
+  disagree the screen says so.
+* **Similarity is not support.** Retrieval clearing the floor only means the
+  corpus contains text that READS like the brief. A brief for municipal digital
+  signage retrieved French public-sector IT tenders at 0.64 cosine — the same
+  closest score as a well-evidenced brief about turbine gearboxes — and
+  synthesis then produced two candidates whose every claim the critic correctly
+  rejected, for citing tenders that were about employment services. So a brief
+  must also be SUPPORTED: at least three retrieved signals about its use case or
+  its technology, not merely its sector. The test is the one
+  `config/settings.yaml` already prescribes for enrichment
+  (`require_taxonomy_corroboration`), reused rather than reinvented, with the
+  vertical deliberately excluded — it is the axis that corroborates every brief
+  ever written about a well-covered sector.
+* **Two stages, cheapest first.** The vocabulary test is free and precise but
+  has poor recall: a report on a utility's compromised RTUs is unmistakably
+  about threat detection for energy operators and will never contain the string
+  "SIEM and SOAR". Where it comes up short, one cheap model call is spent on the
+  same retrieved documents — the same trade §4.4.4 makes for the entailment
+  check. A provider failure keeps the vocabulary answer rather than turning
+  every brief into a refusal.
+* **Neither the assistant's own hedge nor the user's "yes" is permission.** If
+  the assistant writes "the evidence is thin", it must set `ready` false and
+  propose nothing; saying it is thin and proposing it anyway reads as a warning
+  and behaves as a recommendation. It may not resolve thin evidence by asking
+  "shall I proceed?" — the person cannot see the corpus and it can.
+* **Closed vocabularies, in both directions.** What someone says is resolved
+  through the vocabulary's own synonyms — "banking" becomes
+  `financial_services` — and what cannot be resolved is dropped and named rather
+  than carried through to fail validation three stages later.
+* **DR-03 is said before the run.** A brief landing on an occupied triple names
+  the space it would refresh, while there is still a choice about it.
+* **One conversation can produce several spaces.** Distinct triples become
+  distinct briefs and distinct synthesis passes inside a single run
+  (`POST /api/generate/briefs`), because synthesis holds the only write lock on
+  that identity. The briefs are editable before they run, and the run re-checks
+  whatever is actually submitted.
+* Stateless: the transcript lives in the browser and is posted whole each turn.
+  No session table, nothing to expire. The opening turn is written rather than
+  generated, so it costs no model call.
+
+---
+
 ## The Planner
 
 **Added.** A portfolio planner: stated constraints in, a selected set of

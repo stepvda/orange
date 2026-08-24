@@ -2,6 +2,7 @@ import type {
   BriefMeta, Competition, CompetitorAnalysis, Coverage, FilterState, GenerationConstraints, GenerationJob,
   Plan, PlannerMeta, PlanRequest, PlanReport, PlanReportStatus,
   GenerationMatch, GenerationOptions, MarketSize, Meta, RadarView, Topic, TopicDescription,
+  ChatMessage, HypothesisRequest, ScopingOpening, ScopingTurn,
 } from './types'
 
 const BASE = '/api'
@@ -15,11 +16,38 @@ async function get<T>(path: string, params?: Record<string, string | string[] | 
     else url.searchParams.set(key, value)
   }
   const res = await fetch(url.toString())
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${res.statusText} — ${body.slice(0, 200)}`)
-  }
+  if (!res.ok) throw await failure(res, path)
   return parse<T>(res, path)
+}
+
+/** Turn a failed response into an error somebody can act on.
+ *
+ * The API puts the real reason in `detail` — a model failure, a missing key, a
+ * run already in flight — and reporting the status line instead would leave the
+ * user with "500" for every one of them.
+ *
+ * The case worth naming is a 500 with NO body at all. The API never produces
+ * one: an unhandled exception in FastAPI still answers with text, and every
+ * deliberate refusal here carries a `detail`. An empty-bodied 500 comes from
+ * the Vite dev proxy when the backend it forwards to is not running — and its
+ * symptom, `500 Internal Server Error — ` with nothing after the dash, appears
+ * on every panel of the screen at once and says nothing about the cause. In dev
+ * the cause is nearly always that the API process stopped, so that is what this
+ * says.
+ */
+async function failure(res: Response, path: string): Promise<Error> {
+  const body = (await res.text().catch(() => '')).trim()
+  if (!body && res.status >= 500) {
+    return new Error(
+      `${res.status} from ${BASE}${path} with an empty body, which the API never sends — every `
+      + 'refusal it makes carries a reason. In development this is the dev-server proxy answering '
+      + 'for a backend that is not running: start it (radar serve, or uvicorn radar.api:app '
+      + '--port 8000) and retry.',
+    )
+  }
+  let detail = body.slice(0, 300)
+  try { detail = JSON.parse(body).detail ?? detail } catch { /* not JSON */ }
+  return new Error(detail || `${res.status} ${res.statusText}`)
 }
 
 /** Read a JSON body, or say what arrived instead.
@@ -56,14 +84,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
       body: JSON.stringify(body),
     }),
   })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    // The API puts the real reason in `detail` — a model failure, a missing
-    // key — and swallowing it would leave the user with "500".
-    let message = body.slice(0, 300)
-    try { message = JSON.parse(body).detail ?? message } catch { /* not JSON */ }
-    throw new Error(message || `${res.status} ${res.statusText}`)
-  }
+  if (!res.ok) throw await failure(res, path)
   return parse<T>(res, path)
 }
 
@@ -181,6 +202,35 @@ export const api = {
    *  become the only facts the model may cite. */
   startGenerationFromBrief: (description: string) =>
     post<GenerationJob>('/generate/brief', { description }),
+
+  /** One space per brief, in a single run. The scoping conversation can land on
+   *  several distinct taxonomy triples, and synthesis holds the only write lock
+   *  on that identity — separate requests would just collect 409s. */
+  startGenerationFromBriefs: (descriptions: string[]) =>
+    post<GenerationJob>('/generate/briefs', { descriptions }),
+
+  /** Build a space the corpus is silent about, on evidence you contribute.
+   *
+   *  Not a bypass of the evidence rule — the opposite. The rationale is recorded
+   *  as a dated, attributable internal signal (FR-24, tier 3) and the ordinary
+   *  run then cites it, so the space rests on a named person's assertion rather
+   *  than on nothing, and scores like the hypothesis it is. */
+  startGenerationFromHypothesis: (body: HypothesisRequest) =>
+    post<GenerationJob & { internal_signal_id: string }>('/generate/hypothesis', body),
+
+  /* --- the scoping conversation ---------------------------------------------
+   * Stateless: the transcript lives here and is posted whole on every turn, so
+   * there is no session to expire and a reload loses a conversation rather than
+   * leaking one. The opening turn is a GET because it is written, not generated,
+   * and costs no model call. */
+
+  scopingOpening: () => get<ScopingOpening>('/generate/chat'),
+
+  /** One turn. The reply carries the retrieval and the readiness verdict as
+   *  well as the words, because the screen shows all three — a chat bubble on
+   *  its own would hide the part that makes this different from a text box. */
+  scopingTurn: (messages: ChatMessage[]) =>
+    post<ScopingTurn>('/generate/chat', { messages }),
 
   generationJob: (id: string) => get<GenerationJob>(`/generate/${id}`),
 

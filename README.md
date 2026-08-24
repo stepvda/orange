@@ -136,6 +136,9 @@ src/radar/
   competitor_intel.py     robots-aware competitor crawling and profile generation
   competitor_analysis.py  per-topic competitor join, comparison and differentiation
   generation.py   on-demand constrained synthesis (the Generate screen)
+  scoping.py      the Generate screen's assistant — a corpus-grounded interview
+                  that composes search briefs and refuses the ones the evidence
+                  cannot answer
   internal.py     internal signal intake with a moderation gate (tier 3)
   bootstrap.py    serving-instance storage prep that never raises at import
   scoring.py      5 attractiveness components, right-to-win, horizon, lifecycle

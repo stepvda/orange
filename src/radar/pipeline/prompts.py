@@ -935,3 +935,521 @@ def format_plan_for_narrative(plan: dict[str, Any]) -> str:
               "  compete for the same buying centre.",
               f"  Economics version: {a.get('economics_version')} · owner: {a.get('owner')}"]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# The scoping conversation (the Generate screen's assistant tab)
+#
+# The free-text box this replaces asked for one thing — a description — and gave
+# exactly one piece of feedback: a character count. That is the wrong shape for
+# the task. An opportunity space is a vertical x use case x technology plus a
+# buyer's problem and a place, and somebody who knows their market but not this
+# taxonomy will reliably under-specify two of the five. The run then fails on
+# retrieval, minutes later, and the only report is "nothing close enough".
+#
+# So the assistant interviews rather than accepts. Three things make that
+# interview worth having rather than a form with a chat skin:
+#
+# 1.  IT HAS THE CORPUS IN FRONT OF IT. Every turn is given the theme-cluster
+#     map, the geography and signal-type distribution, and the signals actually
+#     retrieved by what has been said so far. That is what lets it ask "the
+#     evidence here is German and Dutch tenders — is the Netherlands in scope?"
+#     instead of "which geography?", and what lets it say the corpus is thin
+#     DURING the conversation rather than after a run creates nothing.
+#
+# 2.  IT ASKS FOR WHAT IS MISSING, IN THE ORDER THAT MATTERS. The slots below
+#     are ranked by how much they change retrieval. Vertical first, because it
+#     is the axis the radar is organised on; deployment last, because it shapes
+#     the sentence rather than the search.
+#
+# 3.  IT DOES NOT DECIDE WHEN IT IS READY. The model proposes; `radar.scoping`
+#     re-runs the same retrieval the generation job will run and refuses to
+#     enable the button if the brief would retrieve nothing. A model asked
+#     "do you have enough?" says yes — that is what models do.
+# ---------------------------------------------------------------------------
+
+#: Bumped from v1 when the support test and the two non-permissions were added
+#: (DR-10: changing a prompt means bumping its version, or the lineage claim in
+#: NFR-02 is false).
+PROMPT_VERSION_SCOPING = "scoping-v2"
+
+#: The cheap second opinion on whether retrieved evidence is ABOUT a brief. Same
+#: job as the entailment check and costed the same way — short text, small model.
+PROMPT_VERSION_BRIEF_SUPPORT = "brief-support-v1"
+
+#: At most this many spaces may come out of one conversation. A conversation
+#: that has genuinely found four distinct triples is rare; one that reports four
+#: is usually splitting a single idea to look generous, and each brief is a
+#: separate synthesis pass with its own model calls (NFR-10).
+MAX_BRIEFS_PER_CHAT = 3
+
+#: What the conversation is trying to establish, in the order it should be
+#: asked for. `required` marks the three that ARE the opportunity space (§4.4.5
+#: — canonical identity is the taxonomy triple); the rest change the quality of
+#: the brief rather than its validity, and the assistant asks for them only
+#: while it has turns to spare.
+#:
+#: `ask` is the question in the assistant's own voice. It is here rather than in
+#: the prose of the system prompt so that the questions are reviewable as a set,
+#: the way the vocabularies are — and so that adding a slot adds a question.
+SCOPING_SLOTS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "vertical",
+        "label": "Vertical — whose industry",
+        "required": True,
+        "vocabulary": "verticals",
+        "why": "The radar is organised on the taxonomy triple and the vertical is the axis a "
+               "salesperson actually walks in on. Without it the brief retrieves technology news "
+               "from every industry at once and the resulting space is a theme, not an opportunity.",
+        "ask": "Which industry has this problem? If it is really several, say which one you would "
+               "walk into first — I can build the others afterwards.",
+    },
+    {
+        "id": "use_case",
+        "label": "Use case — what the buyer is trying to do",
+        "required": True,
+        "vocabulary": "use_cases",
+        "why": "A technology without a job to do is a capability, not an opportunity. This is the "
+               "slot most often left implicit, because the person describing it already knows it.",
+        "ask": "What is the customer actually trying to achieve — the operational job, not the "
+               "technology? Cut unplanned downtime, meet a reporting deadline, keep a site safe?",
+    },
+    {
+        "id": "technology",
+        "label": "Technology — what would be deployed",
+        "required": True,
+        "vocabulary": "technologies",
+        "why": "It decides whether Orange has anything to sell, and it is what the patent and "
+               "standards evidence in the corpus is indexed on.",
+        "ask": "What would actually be deployed to do it? If you are not sure, tell me the "
+               "constraint — no site coverage, no cloud allowed, nobody to run it — and I will "
+               "suggest what the evidence points at.",
+    },
+    {
+        "id": "buyer_problem",
+        "label": "The pain — why they would pay",
+        "required": False,
+        "vocabulary": None,
+        "why": "It is what turns a statement into something a customer recognises as being about "
+               "them, and it steers retrieval towards regulation and buying signals rather than "
+               "vendor announcements.",
+        "ask": "What goes wrong today if nobody does this — a cost, an outage, a deadline, a fine?",
+    },
+    {
+        "id": "geographies",
+        "label": "Geography — where",
+        "required": False,
+        "vocabulary": None,
+        "why": "Geography rides on signals (§2.6), so it is a real filter on the evidence rather "
+               "than a label. It is also where a brief most often outruns the corpus.",
+        "ask": "Which countries or regions? I will tell you straight away whether the corpus "
+               "carries evidence there.",
+    },
+    {
+        "id": "personas",
+        "label": "Buyer — who signs",
+        "required": False,
+        "vocabulary": "personas",
+        "why": "Two people buy very different things under the same use case. It changes the "
+               "statement and the next action, not the retrieval.",
+        "ask": "Who owns this budget — the CIO, the plant or operations side, security, "
+               "sustainability, a line-of-business head?",
+    },
+    {
+        "id": "deployment",
+        "label": "Shape — how Orange would sell it",
+        "required": False,
+        "vocabulary": None,
+        "why": "Managed service, integration, or a product sale are different right-to-win "
+               "arguments. It shapes the sentence rather than the search, so it is asked last.",
+        "ask": "How would this be sold — as a managed service, an integration project, or "
+               "something the customer runs themselves?",
+    },
+)
+
+
+def scoping_slot_block() -> str:
+    """The interview plan, rendered for the prompt."""
+    lines = []
+    for index, slot in enumerate(SCOPING_SLOTS, 1):
+        kind = "REQUIRED" if slot["required"] else "optional"
+        vocab = f" [must resolve to a {slot['vocabulary']} id]" if slot["vocabulary"] else ""
+        lines.append(f"{index}. {slot['id']} — {slot['label']} ({kind}){vocab}")
+        lines.append(f"   Why it matters: {slot['why']}")
+        lines.append(f"   Ask it roughly like this: \"{slot['ask']}\"")
+    return "\n".join(lines)
+
+
+def scoping_system_prompt(cfg: Config, min_chars: int, max_chars: int,
+                          min_signals: int) -> str:
+    """The scoping assistant (§4.4.2's context, put to a conversational use).
+
+    Everything the synthesis prompt is given — who Orange is, the closed
+    vocabularies, what specificity means — the assistant needs too, because it
+    is composing the input to that prompt. What it adds is an interview policy
+    and the hard rule that it is talking about a corpus it can see rather than
+    about the world.
+    """
+    return f"""MOCK_KIND=scoping
+{orange_context_block(cfg)}
+
+WHO YOU ARE
+You are the Innovation Radar's scoping assistant. Someone has come to the
+Generate screen with an idea in their head and wants an opportunity space out of
+it. Your job is to interview them until the idea is specific enough to retrieve
+real evidence with — and to tell them honestly when the corpus cannot support
+what they are describing.
+
+You are NOT a general assistant. You do not know about the world; you know about
+this corpus, and the corpus is put in front of you every turn. If it is not in
+the evidence you were given, you have not heard of it.
+
+WHAT YOU ARE COMPOSING
+An opportunity space is exactly:
+
+    Vertical  x  Use Case  x  Technology
+
+plus one specific sentence a salesperson could open a customer meeting with.
+Everything you ask for is in service of writing a SEARCH BRIEF that will
+retrieve the evidence such a space could rest on.
+
+{vocabulary_block(cfg)}
+
+{examples_block()}
+
+WHAT YOU ARE TRYING TO ESTABLISH — ask for what is missing, in this order
+{scoping_slot_block()}
+
+HOW TO ASK
+1.  ONE question per turn. Two only when the second is a trivial confirmation.
+    A numbered list of five questions is a form, and a form is what this screen
+    already had.
+2.  ASK FOR THE HIGHEST MISSING SLOT FIRST, using the order above. Skip anything
+    the person has already said, anything you can infer with confidence from
+    what they said, and anything the retrieved evidence settles on its own.
+3.  GROUND THE QUESTION IN THE EVIDENCE. You have the signals their words
+    actually retrieved. Ask "the tenders here are German and Dutch — is the
+    Netherlands in scope, or only Germany?" rather than "which geography?".
+    A question that could have been asked without the corpus is a wasted turn.
+4.  OFFER OPTIONS RATHER THAN A BLANK. Where the answer must come from a closed
+    vocabulary, name two or three plausible ids in plain language and let them
+    pick or correct you. Put the same options in `suggestions` so they can be
+    clicked.
+5.  NEVER MAKE THEM LEARN THE TAXONOMY. Talk in their words; map to ids
+    silently. If what they said has no legal id, say what the nearest one covers
+    and ask them to confirm — do not report a validation error.
+6.  BE BRIEF. Two or three sentences. You are interviewing, not briefing.
+7.  NEVER ask for a market size, a budget, a growth rate or any other number,
+    and never state one.
+8.  NEVER ASK FOR THE SAME SLOT TWICE. If you asked and they answered, that
+    slot is DONE, even if their answer did not map cleanly onto an id. Re-asking
+    reads as not listening, and it is: they told you, and the gap is in the
+    vocabulary rather than in what they said.
+
+9.  WHEN NOTHING IN THE VOCABULARY FITS, SAY SO AND TAKE THE NEAREST. The lists
+    are closed and finite — 59 use cases, not every job a business can have — so
+    an idea worth having will regularly land between two of them or outside all
+    of them. That is a fact about the taxonomy, not a defect in the idea, and it
+    is NEVER a reason to keep asking. Name the closest id, say plainly that it is
+    an approximation and which part of their idea it does not carry, and use it.
+    "The taxonomy has no id for monetising advertising inventory; the nearest is
+    customer_self_service, which covers the citizen-facing screen but not the ad
+    revenue — I will file it under that and say so" is a good turn. Asking a
+    fourth time what the core job is, is not.
+
+10. STOP ASKING BY YOUR SIXTH TURN. If the required slots are still not filled by
+    then, fill them with your best reading of what has been said, say what you
+    assumed, and propose the brief. An interview that never ends produces
+    nothing, which is worse than a brief with a stated approximation in it.
+
+WHAT COUNTS AS SUPPORT — read this before you call anything "close"
+The signals you are shown were retrieved by SIMILARITY. Similarity is not
+support. A brief about municipal digital signage retrieves French public-sector
+IT tenders at a high score because they are the same sector in the same country,
+and not one of them mentions a screen. If you propose that space, synthesis
+writes claims citing those tenders and the critic correctly refuses every one —
+several model calls spent to produce nothing.
+
+So before you treat a retrieved signal as evidence, ask what it is ABOUT, from
+its own title and extract:
+
+*   Does it mention the use case, or something a reader would agree is the same
+    job? Does it mention the technology?
+*   Or is it merely the same industry, the same country, the same buyer?
+
+Count the ones that pass. If fewer than {min_signals} of them do, the corpus does
+NOT support the brief, however high the similarity scores are and however many
+signals came back. Say that plainly and name what the corpus does carry instead.
+
+BUT STILL PROPOSE THE BRIEF. This is the important part, and it is the opposite of
+what you may be inclined to do. The corpus cannot evidence a genuinely new idea —
+that is what "new" means — and stopping there makes this screen useless for
+exactly the work it is most wanted for. What you must not do is pretend the
+evidence exists. What you SHOULD do is put the brief forward with `ready` false,
+so the person can build it on what THEY know: their own account is then recorded
+as dated, attributable internal evidence and the space rests on that instead.
+Say so in your reply — "the radar has nothing on this, but you clearly do; I can
+build it on what you have told me" — and fill `hypothesis_rationale`.
+
+WHAT TO DO WITH THE EVIDENCE
+*   State what the corpus holds, referring to signals by their ids, and only
+    what is in the block you were given. Never invent a publisher, a date or a
+    document.
+*   If the retrieval is thin ({min_signals} usable signals is the floor a run
+    needs), say so NOW — while it can still be steered — rather than letting
+    them press Generate and get nothing back. Suggest the adjacent thing the
+    corpus does carry.
+*   If the evidence points somewhere better than what they asked for, say so and
+    ask. That is the most valuable thing you can do in this conversation.
+*   If a taxonomy cell they are converging on is already in the radar, say which
+    space it is. Under DR-03 a run landing there refreshes that space rather
+    than creating a new one, and they may prefer to aim somewhere else.
+
+WHEN YOU ARE READY
+Set `ready` to true only when ALL of these hold:
+*   vertical, use_case and technology are each resolved to a legal id;
+*   you can write a brief that names the industry, the buyer's problem, what
+    would be deployed and (if known) where;
+*   at least {min_signals} of the retrieved signals are ABOUT the use case or the
+    technology, by the test above — not merely about the same sector.
+Otherwise set `ready` false. Do not set it true to be helpful — the server
+re-runs the retrieval on every brief you propose, applies that same test, and
+will overrule you. An enabled button that produces nothing is worse than another
+question.
+
+`ready` false does NOT mean propose nothing. It means "not on the strength of the
+corpus". Once the required three slots are settled, propose the brief either way:
+`ready` true when the evidence carries it, and `ready` false with a filled
+`hypothesis_rationale` when it does not.
+
+"Settled" means YOU have chosen an id, not that a perfect one exists. A slot you
+have asked about once is settled by the nearest legal id plus an honest note
+about what it approximates. The only time you propose no brief at all is when the
+person has not yet told you enough to choose even approximately — and after your
+third turn that is almost never true.
+
+TWO THINGS THAT ARE NOT PERMISSION TO PROCEED
+1.  YOUR OWN HEDGE. If you find yourself writing "the evidence is thin", "the
+    closest match is only", "direct evidence is limited" or anything of that
+    shape, you have just said the corpus does not support it. Set `ready` false —
+    and offer the other route in the same breath. What you must never do is set
+    `ready` TRUE after writing that: it reads as a warning and behaves as a
+    recommendation, and the run it starts spends model calls to produce nothing.
+2.  THE PERSON SAYING YES. They cannot see the corpus and you can. "Go ahead",
+    "yes", "propose it" answers a question about what they WANT, never a
+    question about what the evidence holds. Never ask "shall I proceed?" as a
+    way of resolving thin evidence — if it is thin, the answer is already no,
+    and asking hands them a decision they have no basis to make. Ask instead for
+    the thing that would change the retrieval: a different use case, a different
+    technology, an adjacent problem the corpus does cover — or offer to build it
+    on what they know, which is the honest way to say yes to a new idea.
+
+HOW MANY SPACES
+Usually one. Propose up to {MAX_BRIEFS_PER_CHAT} only when the conversation has
+genuinely landed on that many DISTINCT taxonomy triples — a different vertical,
+a different use case or a different technology. Two briefs that differ only in
+wording are one brief; splitting an idea to look generous wastes a synthesis
+pass each.
+
+WRITING A BRIEF
+The brief is a SEARCH BRIEF, not evidence and not the finished statement. It is
+embedded and used to retrieve the closest corroborated signals in the corpus,
+and those become the only facts the resulting space may rest on. So write it to
+be retrieved with: {min_chars}-{max_chars} characters, concrete nouns, the
+sector, the buyer's problem, the technology, what would be deployed, and the
+geography if there is one. No numbers. No adjectives that carry no meaning
+("innovative", "next-generation", "cutting-edge"). Prefer the words the evidence
+itself uses.
+
+OUTPUT — a single JSON object, nothing else:
+{{
+  "reply": "<your next turn, 2-3 sentences, plain language, no markdown headings>",
+  "understood": {{
+    "vertical": "<vertical id or null>",
+    "use_case": "<use case id or null>",
+    "technology": "<technology id or null>",
+    "buyer_problem": "<one short phrase or null>",
+    "geographies": ["<ISO 3166-1 alpha-2 code or EU>", ...],
+    "personas": ["<persona id>", ...],
+    "deployment": "<managed service | integration | product | null>",
+    "horizon": "<now | next | later | null>"
+  }},
+  "missing": ["<slot id you still need>", ...],
+  "asking_for": "<the slot id this turn's question is about, or null>",
+  "suggestions": ["<a clickable answer to YOUR question, in the user's words>", ...],
+  "evidence_note": "<one sentence on what the corpus does or does not carry here, or null>",
+  "ready": <true|false>,
+  "briefs": [
+    {{
+      "title": "<5-8 words naming the space>",
+      "description": "<the search brief, {min_chars}-{max_chars} characters>",
+      "vertical": "<vertical id>",
+      "use_case": "<use case id>",
+      "technology": "<technology id>",
+      "geographies": ["<ISO code>", ...],
+      "rationale": "<one sentence: which retrieved signals make this worth running>",
+      "hypothesis_rationale": "<REQUIRED when ready is false. What THIS PERSON has
+        told you that the corpus does not carry — who is asking, what they want,
+        what is stopping them — in their terms, as a paragraph a colleague could
+        act on. It is recorded under their name as internal evidence and the
+        space will cite it, so it must be what they actually said and nothing you
+        have supplied. Null when ready is true.>"
+    }}
+  ]
+}}
+
+`briefs` is an empty list until you are ready. `understood` is CUMULATIVE — it
+carries everything established so far in the conversation, not just this turn."""
+
+
+def brief_support_prompt(vertical: str, use_case: str, technology: str) -> str:
+    """Does this retrieved evidence actually support a space on this triple?
+
+    The gate in `radar.scoping` asks a lexical question first — does the signal
+    text carry a vocabulary term, does its CPV crosswalk hit — because it is free
+    and, when it fires, it is right. What it is not is COMPLETE: a report on a
+    utility's compromised RTUs is unambiguously about threat detection for energy
+    operators and will never contain the string "SIEM and SOAR". Refusing a brief
+    on that basis would trade one wrong answer for another.
+
+    So where the lexical test comes up short, this asks. It is deliberately the
+    same shape as the entailment check (§4.4.4 defence 4) — a cheap model, a
+    short text, one narrow question — and it is asked ONLY about evidence that
+    already cleared retrieval, which is what keeps it to a single call at the
+    moment somebody is about to spend a whole synthesis run.
+    """
+    return f"""MOCK_KIND=brief_support
+You decide which of several documents genuinely bear on a proposed business
+opportunity. You are a filter, not an author.
+
+THE PROPOSAL
+  Industry:   {vertical}
+  The job:    {use_case}
+  Deployed:   {technology}
+
+A document SUPPORTS the proposal when a reader would agree it is evidence about
+that job or that technology — in that industry or in one close enough to carry
+over. It does not have to use the same words.
+
+A document DOES NOT SUPPORT the proposal when it is merely:
+  * the same industry, country or buyer, doing something else;
+  * the same broad field ("digital", "cloud", "IT services") with no bearing on
+    this job;
+  * a general research or opinion piece with nothing specific to this.
+
+Be strict. The cost of accepting a document that is only adjacent is a set of
+claims that cite it, which a later reviewer will correctly reject. When you are
+unsure, say it does not support.
+
+Return JSON: {{"supporting": ["<id>", ...], "note": "<one short sentence on what
+this evidence is actually about>"}}
+Include an id only if you would defend it. An empty list is a valid and often
+correct answer."""
+
+
+def format_signals_for_support(signals: list[dict[str, Any]]) -> str:
+    lines = ["DOCUMENTS", ""]
+    for signal in signals:
+        lines.append(f"[{signal['id']}] {signal.get('title', '')}")
+        if signal.get("extract"):
+            lines.append(f"    {str(signal['extract'])[:300]}")
+    lines.append("")
+    lines.append("Which of these support the proposal? Reply with the JSON object only.")
+    return "\n".join(lines)
+
+
+def scoping_user_prompt(transcript: list[dict[str, str]], corpus: dict[str, Any],
+                        evidence: dict[str, Any], occupied: list[str],
+                        turns_taken: int) -> str:
+    """Everything the assistant is allowed to know, this turn.
+
+    Three blocks, in order of how much they should influence the question: what
+    the corpus is about at all, what the conversation so far actually retrieved,
+    and what has been said. The retrieval is recomputed from the whole
+    conversation on every turn, so an answer that sharpens the idea sharpens the
+    evidence the next question is asked from.
+    """
+    lines: list[str] = []
+
+    lines.append("WHAT THE CORPUS CONTAINS (the whole radar, for orientation)")
+    lines.append(f"  {corpus['signals']} classified signal(s) in {corpus['clusters']} theme "
+                 f"cluster(s); {corpus['spaces']} opportunity space(s) already exist.")
+    if corpus.get("date_range"):
+        lines.append(f"  Evidence dates from {corpus['date_range'][0]} to {corpus['date_range'][1]}.")
+    if corpus.get("by_signal_type"):
+        lines.append("  By signal type: "
+                     + ", ".join(f"{k} {v}" for k, v in corpus["by_signal_type"]))
+    if corpus.get("by_geography"):
+        lines.append("  Best-covered geographies: "
+                     + ", ".join(f"{k} {v}" for k, v in corpus["by_geography"]))
+    if corpus.get("clusters_sample"):
+        lines.append("  The largest theme clusters, which is what the radar is currently about:")
+        for cluster in corpus["clusters_sample"]:
+            keys = f" — {cluster['keyphrases']}" if cluster.get("keyphrases") else ""
+            lines.append(f"    [{cluster['size']} signals] {cluster['label']}{keys}")
+
+    lines.append("")
+    if evidence.get("signals"):
+        lines.append(f"WHAT THIS CONVERSATION HAS RETRIEVED SO FAR "
+                     f"({len(evidence['signals'])} signal(s) above the similarity floor "
+                     f"{evidence['floor']:.2f})")
+        lines.append("These are the only documents you may refer to as facts. Cite them by id.")
+        for signal, similarity in zip(evidence["signals"], evidence["similarities"]):
+            # `geographies` arrives decoded — the caller owns the JSON columns so
+            # that prompt construction stays free of the storage layer.
+            geos = ", ".join(signal.get("geographies") or []) or "no geography"
+            lines.append(
+                f"  [{signal['id']}] ({similarity:.2f}) {signal['title']}"
+            )
+            lines.append(
+                f"      {signal.get('publisher')} · {signal.get('published_at')} · "
+                f"{signal.get('signal_type') or 'unclassified'} · tier {signal.get('tier')} · {geos}"
+            )
+            if signal.get("extract"):
+                lines.append(f"      {str(signal['extract'])[:260]}")
+    else:
+        lines.append("WHAT THIS CONVERSATION HAS RETRIEVED SO FAR")
+        lines.append("  Nothing yet — either too little has been said to retrieve with, or nothing "
+                     "in the corpus is close to it. If enough has been said to be specific and the "
+                     "retrieval is still empty, say so: that is the answer, and the corpus map "
+                     "above is where to look for the nearest thing it does carry.")
+
+    if occupied:
+        lines.append("")
+        lines.append("TAXONOMY CELLS ALREADY OCCUPIED near this conversation (DR-03: a run landing "
+                     "on one of these REFRESHES that space, it does not create a new one)")
+        lines += [f"  {cell}" for cell in occupied]
+
+    lines.append("")
+    lines.append(f"THE CONVERSATION SO FAR (you have taken {turns_taken} turn(s))")
+    for message in transcript:
+        who = "PERSON" if message["role"] == "user" else "YOU"
+        lines.append(f"  {who}: {message['content']}")
+
+    lines.append("")
+    lines.append("Answer the last thing the person said, then ask for the highest-priority slot "
+                 "still missing — or, if the required three are settled and the evidence supports "
+                 "it, propose the brief(s) and set ready. Reply with the JSON object only.")
+    return "\n".join(lines)
+
+
+#: The assistant's first turn. Written rather than generated: it is the same
+#: every time, it costs a model call to produce, and it is the one message that
+#: has to set the expectation that this is an interview grounded in a fixed
+#: corpus rather than a wish-granting box.
+SCOPING_OPENING = (
+    "Tell me what you are chasing and I will turn it into an opportunity space — but only if the "
+    "evidence the radar has already collected supports it. I can see the whole corpus from here, "
+    "so I will tell you as we go what it does and does not carry.\n\n"
+    "Start anywhere: an industry, a customer problem you keep hearing, a technology you think is "
+    "about to land. I will ask for whatever is missing."
+)
+
+#: Openers offered as chips beside the first turn. Deliberately shaped like the
+#: positive examples above — three axes, one sentence — so the first answer
+#: teaches the granularity without a paragraph explaining it.
+SCOPING_OPENING_SUGGESTIONS = (
+    "What is the corpus strongest on right now?",
+    "Something in manufacturing that is being driven by regulation",
+    "Where does Orange have a right to win that we are not already covering?",
+)

@@ -480,6 +480,154 @@ export interface GenerationMatch {
   topics: Topic[]
 }
 
+/* -------------------------------------------------------------------------
+ * The scoping conversation (the Generate screen's assistant tab).
+ *
+ * Mirrors radar.scoping. The field worth reading twice is `ready`: it is the
+ * SERVER's verdict, not the model's. Every brief the assistant proposes is put
+ * back through the same retrieval the generation job will run, and a brief the
+ * corpus cannot answer disables the button it would otherwise enable. The
+ * model's own opinion arrives separately as `model_ready`, which is only ever
+ * interesting when the two disagree.
+ * ---------------------------------------------------------------------- */
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+/** One retrieved signal, with everything needed to disagree with it. */
+export interface ScopingSignal {
+  id: string
+  title: string
+  publisher: string
+  published_at: string
+  signal_type: string | null
+  tier: number
+  url: string | null
+  geographies?: string[]
+  similarity: number
+  /** Why this signal independently supports the brief — a vocabulary term in its
+   *  text or a CPV crosswalk hit — or null when it is merely close. Similarity
+   *  alone is not support: a brief retrieves same-sector, same-country documents
+   *  at a high score whether or not any of them is about its subject. */
+  corroborates?: string | null
+}
+
+export interface ScopingBrief {
+  title: string
+  /** The search brief itself. Editable before it is run — the job re-checks the
+   *  corpus for whatever text is actually submitted. */
+  description: string
+  vertical: string | null
+  use_case: string | null
+  technology: string | null
+  geographies: string[]
+  rationale: string
+  /** What YOU asserted in the conversation that the corpus does not carry.
+   *  Pre-fills the contributed-evidence box — you have just spent six turns
+   *  saying this, and being asked to type it all again is the refusal with an
+   *  extra step. Empty when the corpus carries the brief on its own. */
+  hypothesis_rationale: string
+  /** `count` is what was retrieved; `corroborated` is what actually supports the
+   *  brief. The gap between them is the whole reason a run can cost model calls
+   *  and create nothing. */
+  evidence: {
+    count: number
+    best: number | null
+    corroborated: number
+    /** Which test answered: `vocabulary` when the free one sufficed, `model`
+     *  when it came up short and a cheap second opinion was bought. */
+    support_method?: 'vocabulary' | 'model'
+    signals: ScopingSignal[]
+  }
+  /** The space already sitting on this taxonomy triple, if any. Not a problem —
+   *  the run is legal — but it means DR-03 refreshes rather than creates. */
+  existing: { id: string; statement: string; state: string } | null
+  /** Why this brief cannot be run as evidence-backed, if it cannot. Empty when
+   *  it can. */
+  problems: string[]
+  runnable: boolean
+  /** The corpus is silent, but the brief itself is sound — so the other route is
+   *  open: contribute what you know as an attributable internal signal (FR-24)
+   *  and build on that. False when the brief is malformed or outside the
+   *  vocabulary, which no route can fix. */
+  hypothesis: boolean
+}
+
+/** The three internal evidence kinds (§2.5), and what each becomes. */
+export const HYPOTHESIS_KINDS = [
+  { id: 'customer_conversation', label: 'A customer conversation', becomes: 'trend' },
+  { id: 'rfp_theme', label: 'An RFP or tender theme', becomes: 'buying signal' },
+  { id: 'lost_deal', label: 'A deal we lost', becomes: 'market move' },
+] as const
+
+export interface HypothesisRequest {
+  description: string
+  rationale: string
+  kind: string
+  vertical?: string | null
+  geographies?: string[]
+}
+
+export interface ScopingSlot {
+  id: string
+  label: string
+  required: boolean
+}
+
+export interface ScopingCorpus {
+  signals: number
+  clusters: number
+  spaces: number
+  by_signal_type: [string, number][]
+  by_geography: [string, number][]
+  clusters_sample: { id: number; label: string; size: number; keyphrases: string }[]
+  date_range: [string, string] | null
+}
+
+/** The first turn — written rather than generated, so it costs no model call. */
+export interface ScopingOpening {
+  message: string
+  suggestions: string[]
+  corpus: ScopingCorpus
+  slots: ScopingSlot[]
+  min_brief_chars: number
+  max_brief_chars: number
+  max_briefs: number
+  prompt_version: string
+}
+
+export interface ScopingTurn {
+  reply: string
+  /** Cumulative across the conversation, resolved to taxonomy ids server-side. */
+  understood: {
+    vertical: string | null
+    use_case: string | null
+    technology: string | null
+    buyer_problem: string | null
+    geographies: string[]
+    personas: string[]
+    deployment: string | null
+    horizon: string | null
+  }
+  /** What was said but could not be mapped onto a controlled vocabulary. */
+  unresolved: Record<string, string>
+  missing: string[]
+  asking_for: string | null
+  suggestions: string[]
+  evidence_note: string | null
+  ready: boolean
+  model_ready: boolean
+  briefs: ScopingBrief[]
+  evidence: { floor: number; count: number; signals: ScopingSignal[] }
+  /** Spaces already built on the evidence this conversation retrieved (DR-03). */
+  occupied: string[]
+  turns: number
+  soft_turn_limit: number
+  prompt_version: string
+}
+
 export interface GenerationStage {
   id: string
   label: string
@@ -502,7 +650,10 @@ export interface GenerationJob {
   /** `grid` covers the evidenced taxonomy grid; `brief` answers one written
    *  description. They differ in what steers the model, not in what validates it. */
   kind: 'grid' | 'brief'
+  /** Set only when the run answers exactly one brief; a run answering three has
+   *  no single brief to name. `briefs` is the truth. */
   brief: string | null
+  briefs: string[]
   constraints: GenerationConstraints
   constrained: boolean
   status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'

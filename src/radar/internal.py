@@ -34,6 +34,7 @@ from typing import Any
 
 from .config import Config
 from .db import Database, js
+from .embeddings import Embedder
 
 log = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ def pending(db: Database) -> list[dict[str, Any]]:
         "SELECT * FROM internal_signals WHERE moderated = 0 ORDER BY created_at DESC")]
 
 
-def promote(cfg: Config, db: Database) -> dict[str, Any]:
+def promote(cfg: Config, db: Database, embedder: "Embedder | None" = None) -> dict[str, Any]:
     """Turn moderated internal records into signals the pipeline can score.
 
     A promoted record becomes an ordinary row in `signals`, so it clusters,
@@ -100,6 +101,16 @@ def promote(cfg: Config, db: Database) -> dict[str, Any]:
     to open. Every consumer already tolerates that (`idx_signals_url` is a
     partial index precisely for URL-less rows), and inventing a URL to satisfy
     a schema would be the sort of fabricated attribution §4.4.4 forbids.
+
+    `embedder` decides whether the promoted row is visible before the next full
+    refresh. Without one it lands with a null `relevance` and no vector, which
+    every retrieval path filters out (`relevance > 0 AND embedding IS NOT NULL`)
+    — so the note a colleague took today would sit inert until the cadence ran,
+    which for the batch caller is fine and for someone who has just written it
+    down in order to use it is not. Given one, the row is embedded and admitted
+    at full relevance: it was written by a named person and moderated by another,
+    which is a stronger provenance claim than the gate the relevance classifier
+    applies to a fetched page, not a weaker one.
     """
     rows = db.query(
         "SELECT * FROM internal_signals WHERE moderated = 1 AND signal_id IS NULL "
@@ -139,6 +150,15 @@ def promote(cfg: Config, db: Database) -> dict[str, Any]:
             )
             cur.execute("UPDATE internal_signals SET signal_id = ? WHERE id = ?",
                         (signal_id, row["id"]))
+            if embedder is not None:
+                text = f"{row['title']} {row['body'] or ''}".strip()
+                vector = embedder.encode([text])[0]
+                cur.execute(
+                    "UPDATE signals SET relevance = ?, relevance_reason = ?, embedding = ? "
+                    "WHERE id = ?",
+                    (1.0, f"internal signal moderated from {row['id']}",
+                     Embedder.to_blob(vector), signal_id),
+                )
             promoted += 1
 
     log.info("Promoted %d internal signals into the signal store", promoted)

@@ -49,7 +49,8 @@ from .graph import Linker
 from .llm import LLMClient
 from .pipeline.actions import NextActionGenerator
 from .pipeline.enrich import Enricher
-from .pipeline.synthesis import GenerationConstraints, SynthesisProgress, Synthesiser
+from .pipeline.synthesis import (GenerationConstraints, SynthesisProgress, SynthesisStats,
+                                Synthesiser)
 from .scoring import ScoringEngine
 from .sizing import MarketSizer
 
@@ -76,6 +77,12 @@ _EVIDENCE_CEILING = 0.85
 #: description, and the embedding stops being about any one thing.
 MIN_BRIEF_CHARS = 40
 MAX_BRIEF_CHARS = 600
+
+#: How many briefs one run may answer. The scoping conversation caps itself
+#: lower still (prompts.MAX_BRIEFS_PER_CHAT); this is the API's own bound, and
+#: it exists because each brief is a full synthesis pass with its own model
+#: calls — a list is not a cheaper way to ask for twenty spaces.
+MAX_BRIEFS_PER_RUN = 5
 
 #: Runs kept for inspection after they finish. The screen shows the last few so
 #: a reload does not lose the record of what was just generated.
@@ -108,7 +115,11 @@ class GenerationJob:
     #: `brief` answers one written description. They differ in what steers the
     #: model, not in what validates it — both go through the same curation.
     kind: str = "grid"
-    brief: str | None = None
+    #: The written briefs a `brief` run answers, one space attempted per brief.
+    #: A list rather than a string because the scoping conversation can land on
+    #: several genuinely distinct taxonomy triples in one sitting, and running
+    #: them separately would mean three trips through the single-run guard.
+    briefs: list[str] = field(default_factory=list)
     status: str = "queued"          # queued | running | done | error | cancelled
     stage: str | None = None
     stages_done: list[str] = field(default_factory=list)
@@ -194,7 +205,12 @@ class GenerationJob:
             "progress": self.progress,
             "round": self.round,
             "kind": self.kind,
-            "brief": self.brief,
+            # `brief` stays singular for the one-brief case the screen has
+            # always shown; `briefs` is the truth. A run answering three of them
+            # has no single brief to name, and naming the first would read as if
+            # the other two were not asked for.
+            "brief": self.briefs[0] if len(self.briefs) == 1 else None,
+            "briefs": list(self.briefs),
             "units_total": self.units_total,
             "units_done": self.units_done,
             "unit_label": self.unit_label,
@@ -235,12 +251,17 @@ class GenerationService:
 
     # -- embedder ------------------------------------------------------------
 
-    def _get_embedder(self) -> Embedder:
+    def embedder(self) -> Embedder:
         """Loaded on first use and then kept.
 
         The sentence-transformer model takes seconds to load and several hundred
         megabytes to hold. Building it at import would pay that on every API
         process whether or not anyone ever generates anything.
+
+        Public because the scoping conversation (`radar.scoping`) retrieves
+        against the same stored vectors on every turn, and a second copy of the
+        model in the same process is several hundred megabytes bought to compute
+        the identical numbers.
         """
         if self._embedder is None:
             self._embedder = Embedder()
@@ -327,29 +348,55 @@ class GenerationService:
 
     def start_from_brief(self, description: str, run_critic: bool = True,
                          run_entailment: bool = True) -> GenerationJob:
-        """One space from a written description of the opportunity.
+        """One space from a written description of the opportunity."""
+        return self.start_from_briefs([description], run_critic=run_critic,
+                                      run_entailment=run_entailment)
+
+    def start_from_briefs(self, descriptions: list[str], run_critic: bool = True,
+                          run_entailment: bool = True) -> GenerationJob:
+        """One space per written brief, in a single run.
 
         Shares the single-run guard, the stage chain and the reporting with the
-        grid path — the only thing that differs is what steers the model. The
+        grid path — the only thing that differs is what steers the model. Each
         description is a search brief, never evidence: it retrieves the closest
         corroborated signals in the corpus and those become the evidence block
         (see Synthesiser.run_from_brief).
+
+        Several briefs are one run rather than several because synthesis holds
+        the only write lock on the taxonomy triple: three separate requests would
+        mean two 409s and a queue somebody has to babysit. They are still three
+        independent passes — a brief the corpus cannot answer creates nothing and
+        says so, and the two beside it are unaffected.
         """
-        brief = " ".join((description or "").split())
-        if len(brief) < MIN_BRIEF_CHARS:
+        briefs: list[str] = []
+        for description in (descriptions or []):
+            brief = " ".join((description or "").split())
+            if len(brief) < MIN_BRIEF_CHARS:
+                raise ValueError(
+                    f"Describe the opportunity in at least {MIN_BRIEF_CHARS} characters. A few "
+                    f"words cannot retrieve evidence specific enough to build a space on — name "
+                    f"the sector, who has the problem, and what would be deployed."
+                )
+            if len(brief) > MAX_BRIEF_CHARS:
+                raise ValueError(f"Keep each description under {MAX_BRIEF_CHARS} characters.")
+            # Two identical briefs are one pass, not two: they would retrieve the
+            # same evidence, land on the same triple, and the second would be
+            # reported as a DR-03 refresh of the space the first had just made.
+            if brief not in briefs:
+                briefs.append(brief)
+        if not briefs:
+            raise ValueError("No brief was given to generate from.")
+        if len(briefs) > MAX_BRIEFS_PER_RUN:
             raise ValueError(
-                f"Describe the opportunity in at least {MIN_BRIEF_CHARS} characters. A few words "
-                f"cannot retrieve evidence specific enough to build a space on — name the sector, "
-                f"who has the problem, and what would be deployed."
+                f"One run answers at most {MAX_BRIEFS_PER_RUN} briefs; {len(briefs)} were given. "
+                f"Each is a full synthesis pass with its own model calls."
             )
-        if len(brief) > MAX_BRIEF_CHARS:
-            raise ValueError(f"Keep the description under {MAX_BRIEF_CHARS} characters.")
         return self._enqueue(GenerationJob(
             id=self._next_id(),
-            requested=1,
+            requested=len(briefs),
             constraints=GenerationConstraints(),
             kind="brief",
-            brief=brief,
+            briefs=briefs,
             started_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         ), run_critic, run_entailment)
 
@@ -427,8 +474,10 @@ class GenerationService:
             llm = LLMClient(max_retries=self.cfg.settings["llm"]["max_retries"])
             job.refresh_id = self._open_refresh(job, reference_date)
             if job.kind == "brief":
-                job.say(f"Run {job.id} started from a written brief: “{job.brief}”")
-                job.say("The brief is a search request, not evidence. It retrieves the closest "
+                job.say(f"Run {job.id} started from {len(job.briefs)} written brief(s).")
+                for index, brief in enumerate(job.briefs, 1):
+                    job.say(f"Brief {index}: “{brief}”")
+                job.say("A brief is a search request, not evidence. It retrieves the closest "
                         "corroborated signals in the corpus, and those become the only facts the "
                         "model may use (§4.4.4).")
             else:
@@ -442,14 +491,10 @@ class GenerationService:
 
             # -- stage 1: synthesis, the only creative step ------------------
             job.stage = "synthesise"
-            synth = Synthesiser(self.cfg, self.db, llm, self._get_embedder(),
+            synth = Synthesiser(self.cfg, self.db, llm, self.embedder(),
                                 constraints=job.constraints)
             if job.kind == "brief":
-                stats = synth.run_from_brief(
-                    job.refresh_id, job.brief or "", run_critic=run_critic,
-                    run_entailment=run_entailment, progress=job.say,
-                    cancelled=lambda: job.cancelled, tick=job.observe,
-                )
+                stats = self._run_briefs(job, synth, run_critic, run_entailment)
             else:
                 stats = synth.run(
                     job.refresh_id, run_critic=run_critic, run_entailment=run_entailment,
@@ -489,6 +534,58 @@ class GenerationService:
                 if self._active == job.id:
                     self._active = None
 
+    def _run_briefs(self, job: GenerationJob, synth: Synthesiser,
+                    run_critic: bool, run_entailment: bool) -> SynthesisStats:
+        """Answer each brief in turn and report the passes as one run.
+
+        Sequential rather than concurrent on purpose: `_persist` resolves the
+        DR-03 identity rule by reading the taxonomy triple and then writing it,
+        and two briefs converging on the same cell in parallel would race that
+        read. They are cheap to run in order — one retrieval and one generation
+        pass each — and the sequence is also what makes the log readable.
+
+        A brief that retrieves nothing is not an error. It creates nothing, says
+        why, and the next brief runs regardless: the corpus answering two of
+        three questions is exactly the outcome §4.1 asks to be reportable.
+        """
+        total = len(job.briefs)
+        combined = SynthesisStats()
+        created_before: list[str] = []
+        for index, brief in enumerate(job.briefs):
+            if job.cancelled:
+                job.say(f"Cancelled after {index} of {total} brief(s).")
+                break
+            if total > 1:
+                job.say(f"Brief {index + 1} of {total}: “{brief}”")
+
+            # Each pass reports its own position from 1; the screen is watching
+            # one run. Rebase the tick onto the whole set so the bar advances
+            # across briefs instead of resetting on each, and hand it the ids
+            # created so far — `observe` keeps the longer list, so a per-brief
+            # list would look like the count going backwards.
+            def tick(progress: SynthesisProgress, _offset: int = index,
+                     _seen: list[str] = created_before) -> None:
+                job.observe(SynthesisProgress(
+                    round=_offset + 1,
+                    units_total=progress.units_total * total,
+                    units_done=progress.units_total * _offset + progress.units_done,
+                    unit_label=progress.unit_label,
+                    created=tuple(_seen) + tuple(progress.created),
+                ))
+
+            part = synth.run_from_brief(
+                job.refresh_id or "", brief, run_critic=run_critic,
+                run_entailment=run_entailment, progress=job.say,
+                cancelled=lambda: job.cancelled, tick=tick,
+            )
+            combined.absorb(part)
+            created_before = list(combined.created_ids)
+            if total > 1:
+                job.say(f"Brief {index + 1} of {total}: "
+                        f"{len(part.created_ids)} space(s) created, "
+                        f"{len(part.updated_ids)} refreshed.")
+        return combined
+
     def _finish_topics(self, job: GenerationJob, llm: LLMClient, reference_date: dt.date) -> None:
         """Take the new spaces from `candidate` to something worth opening.
 
@@ -499,7 +596,7 @@ class GenerationService:
         """
         ids = job.created_ids
         steps = (
-            ("enrich", lambda: Enricher(self.cfg, self.db, self._get_embedder())
+            ("enrich", lambda: Enricher(self.cfg, self.db, self.embedder())
                 .run(job.refresh_id or "", reference_date, topic_ids=ids)),
             ("link", lambda: Linker(self.cfg, self.db).run(topic_ids=ids)),
             ("score", lambda: ScoringEngine(self.cfg, self.db, llm)
@@ -549,11 +646,12 @@ class GenerationService:
         if created >= job.requested:
             return
         if job.kind == "brief" and not stats.raw_candidates:
+            which = "that description" if len(job.briefs) == 1 else "any of those descriptions"
             job.say(
-                "Nothing was generated. Either the corpus carries no evidence close enough to that "
-                "description, or what it carries does not support an opportunity space along those "
-                "lines. Both are real answers — the alternative would be restating your sentence "
-                "back to you with citations that do not support it."
+                f"Nothing was generated. Either the corpus carries no evidence close enough to "
+                f"{which}, or what it carries does not support an opportunity space along those "
+                f"lines. Both are real answers — the alternative would be restating your sentence "
+                f"back to you with citations that do not support it."
             )
             return
         reasons = []

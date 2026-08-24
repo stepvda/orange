@@ -18,23 +18,25 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import bootstrap
+from . import bootstrap, internal
 from .brief import BriefBuilder, brief_for_topic, brief_path
 from .competition import CompetitionAnalyser, LEVEL_MEANING, competition_for_topic
 from .config import get_config
 from .db import Database, js, unjs
-from .generation import MAX_BRIEF_CHARS, MAX_PER_RUN, MIN_BRIEF_CHARS, GenerationService
+from .generation import (MAX_BRIEF_CHARS, MAX_BRIEFS_PER_RUN, MAX_PER_RUN, MIN_BRIEF_CHARS,
+                         GenerationService)
 from .graph import LINK_MEANING, Linker
 from .pipeline.synthesis import GenerationConstraints
 from .llm import LLMClient
 from .pipeline.describe import DescriptionGenerator, description_for_topic
 from .reference import ReferenceDataFetcher, reference_status
+from .scoping import MAX_MESSAGE_CHARS, MAX_MESSAGES, ScopingError, ScopingService
 from .sizing import MarketSizer, sizes_for_topic
 from .workflow import (AXIS_ANCHORS, AXIS_LABELS, ROLE_AXIS, STAGE_LABELS,
                        STAGE_OWNER_ROLE, STAGES, WorkflowService)
@@ -1275,6 +1277,206 @@ def start_generation_from_brief(payload: GenerateFromBriefIn) -> dict[str, Any]:
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     return _job_payload(job)
+
+
+class GenerateFromBriefsIn(BaseModel):
+    """Several briefs, one run.
+
+    The plural endpoint exists because the scoping conversation can legitimately
+    land on more than one taxonomy triple, and synthesis holds the only write
+    lock on that identity — three separate requests would mean two 409s.
+    """
+
+    descriptions: list[str] = Field(
+        min_length=1, max_length=MAX_BRIEFS_PER_RUN,
+        description="One search brief per opportunity space to attempt. Each is treated the same "
+                    "way the singular endpoint treats its description: a retrieval request, never "
+                    "evidence.",
+    )
+    run_critic: bool = True
+    run_entailment: bool = True
+
+
+@app.post("/api/generate/briefs")
+def start_generation_from_briefs(payload: GenerateFromBriefsIn) -> dict[str, Any]:
+    """Generate one opportunity space per written brief, in a single run."""
+    try:
+        job = _generation.start_from_briefs(payload.descriptions,
+                                            run_critic=payload.run_critic,
+                                            run_entailment=payload.run_entailment)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _job_payload(job)
+
+
+class HypothesisIn(BaseModel):
+    """Build a space the corpus cannot evidence, on evidence you supply.
+
+    The description is still a search brief. What is new is `rationale`: what the
+    person actually knows — the conversation they had, the RFP they saw, the deal
+    they lost — which is recorded as an internal signal and becomes the evidence
+    the space rests on.
+    """
+
+    description: str = Field(min_length=MIN_BRIEF_CHARS, max_length=MAX_BRIEF_CHARS)
+    rationale: str = Field(
+        min_length=80, max_length=2000,
+        description="What you know that the corpus does not. This is stored as an attributable, "
+                    "dated internal signal (FR-24) and cited by the resulting space — so it has "
+                    "to say something a colleague could act on, not restate the brief.",
+    )
+    kind: str = Field(
+        "customer_conversation",
+        description="Which of the three internal evidence kinds this is (§2.5).",
+    )
+    vertical: str | None = None
+    geographies: list[str] = Field(default_factory=list)
+    run_critic: bool = True
+    run_entailment: bool = True
+
+
+@app.post("/api/generate/hypothesis")
+def start_generation_from_hypothesis(payload: HypothesisIn, request: Request) -> dict[str, Any]:
+    """Generate a space the external corpus is silent about (FR-24, §2.5).
+
+    THE CASE THIS EXISTS FOR. The corpus cannot evidence a genuinely new idea —
+    that is what "new" means — and the scoping conversation was refusing on
+    exactly that basis, which made the screen useless for the thing it was most
+    wanted for. Fabricating the evidence was never an option: §4.4.4's whole
+    posture is that a claim rests on a dated, attributable source or it does not
+    exist, and a space citing signals that are not about it is the failure this
+    system was built to prevent.
+
+    So the evidence is not invented, it is CONTRIBUTED. What the person knows is
+    recorded as an internal signal — authored by them, dated now, moderated as
+    the act of asserting it, promoted at tier 3 because §4.3.7 reserves the
+    higher tiers for published records and a conversation is not one. Then the
+    ordinary brief run proceeds, unchanged: it retrieves that signal along with
+    whatever adjacent evidence exists, and every claim still has to cite what
+    came back and survive the critic and the entailment check.
+
+    What comes out is honest in both directions. The space exists, and it scores
+    low — one tier-3 signal, no independent corroboration — because a hypothesis
+    is not a proven trend, and the radar saying so is the feature rather than a
+    shortcoming to work around.
+    """
+    if (reason := _generation.encoder_reason()) is not None:
+        raise HTTPException(409, reason)
+    if payload.kind not in internal.KINDS:
+        raise HTTPException(400, f"Unknown kind {payload.kind!r}. "
+                                 f"Known: {', '.join(sorted(internal.KINDS))}")
+    if payload.vertical and payload.vertical not in _cfg.verticals:
+        raise HTTPException(400, f"Unknown vertical {payload.vertical!r}.")
+
+    author = getattr(request.state, "user", None) or {}
+    author_name = str(author.get("username") or author.get("display_name") or "unknown")
+
+    internal_id = internal.record(
+        _db, author=author_name, kind=payload.kind,
+        # The brief is the headline the signal is retrieved by; the rationale is
+        # its substance. Titling it with the rationale's first words instead
+        # would make the signal retrieve badly against the very brief it exists
+        # to support.
+        title=payload.description[:180],
+        body=payload.rationale,
+        vertical=payload.vertical,
+        geographies=payload.geographies,
+        # Moderated by the act of asserting it, under a named account. That is
+        # weaker than independent review and stronger than an anonymous note,
+        # and it is recorded either way: `author` says who to ask.
+        moderated=True,
+    )
+    # Embedded on the way in, or the signal this run exists to use would be
+    # invisible to the retrieval that run performs until the next full refresh.
+    internal.promote(_cfg, _db, embedder=_generation.embedder())
+
+    try:
+        job = _generation.start_from_briefs([payload.description],
+                                            run_critic=payload.run_critic,
+                                            run_entailment=payload.run_entailment)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    job.say(f"Contributed evidence {internal_id} by {author_name} (internal, tier 3) — this run "
+            f"rests on it. It is an assertion, not a published record, and the score will say so.")
+    payload_out = _job_payload(job)
+    payload_out["internal_signal_id"] = internal_id
+    return payload_out
+
+
+# ---------------------------------------------------------------------------
+# The scoping conversation (the Generate screen's assistant tab)
+#
+# Declared BEFORE /api/generate/{job_id}: FastAPI matches routes in declaration
+# order, and "chat" is a perfectly good job id as far as that pattern is
+# concerned.
+#
+# Stateless. The transcript lives in the browser and arrives whole on every
+# turn — there is no session to expire, nothing to clean up, and a conversation
+# is worth nothing once its briefs have been run. It is also the only thing
+# here that costs a model call per request, which is why the opening turn is
+# written rather than generated.
+# ---------------------------------------------------------------------------
+
+
+class ChatMessageIn(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+
+
+class ScopingChatIn(BaseModel):
+    messages: list[ChatMessageIn] = Field(min_length=1, max_length=MAX_MESSAGES)
+
+
+def _scoping() -> ScopingService:
+    """Built per request, sharing the generation service's loaded encoder.
+
+    Retrieval on every turn goes against the same stored signal vectors the run
+    will read, so a second copy of the sentence-transformer model would be
+    several hundred megabytes bought to compute identical numbers.
+    """
+    return ScopingService(_cfg, _db, embedder=_generation.embedder())
+
+
+@app.get("/api/generate/chat")
+def scoping_opening() -> dict[str, Any]:
+    """The assistant's first turn, and what it can see.
+
+    Costs no model call: the opening is written (`prompts.SCOPING_OPENING`),
+    because it is identical every time and paying for it would buy nothing but
+    latency on a screen nobody has typed into yet.
+    """
+    if (reason := _generation.encoder_reason()) is not None:
+        # The conversation retrieves as its whole reason for existing. Without
+        # the encoder it would be a chatbot with opinions and no corpus, which
+        # is precisely the thing this screen is built not to be.
+        raise HTTPException(409, reason)
+    return _scoping().opening()
+
+
+@app.post("/api/generate/chat")
+def scoping_turn(payload: ScopingChatIn) -> dict[str, Any]:
+    """One turn: answer, re-retrieve, report what is still missing.
+
+    The response carries more than a reply because the screen shows more than a
+    reply — what has been understood, what the words retrieved, and which briefs
+    would actually run. `ready` is the server's verdict, not the model's: every
+    proposed brief is put through the same retrieval the job will perform, and a
+    brief the corpus cannot answer disables the button it would otherwise enable.
+    """
+    if (reason := _generation.encoder_reason()) is not None:
+        raise HTTPException(409, reason)
+    try:
+        return _scoping().reply([m.model_dump() for m in payload.messages])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ScopingError as exc:
+        # 502 rather than 500: the radar is fine, the model provider is not, and
+        # the difference decides whether retrying is worth anything.
+        raise HTTPException(502, f"The scoping assistant could not answer: {exc}") from exc
 
 
 @app.get("/api/generate/jobs")

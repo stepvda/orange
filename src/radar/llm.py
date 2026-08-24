@@ -182,6 +182,19 @@ class LLMClient:
             payload = {"score": 3, "verdict": "revise", "notes": "mock", "issues": []}
         elif "MOCK_KIND=relevance" in system:
             payload = {"items": []}
+        elif "MOCK_KIND=brief_support" in system:
+            # Supports nothing. The tests that reach this branch are about what
+            # happens when the vocabulary test came up short AND the model agrees
+            # the evidence is only adjacent — the case that must block.
+            payload = {"supporting": [], "note": "mock"}
+        elif "MOCK_KIND=scoping" in system:
+            # Shaped like a first turn: a question, nothing understood, nothing
+            # ready. The scoping tests are about what the SERVER does with a
+            # reply — resolving ids, re-retrieving each brief, refusing a ready
+            # flag the corpus does not support — so the stub has to be a
+            # well-formed reply rather than a marker.
+            payload = {"reply": "[mock question]", "understood": {}, "missing": ["vertical"],
+                       "asking_for": "vertical", "suggestions": [], "ready": False, "briefs": []}
         else:
             payload = {"mock": True, "digest": digest[:16]}
         return LLMResponse(text=json.dumps(payload), model="mock")

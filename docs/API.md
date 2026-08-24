@@ -113,6 +113,9 @@ does not know answers `200 text/html`, which the frontend detects and reports as
 |---|---|---|
 | `POST` | `/api/generate` | Start a constrained generation run (background; poll the job). |
 | `POST` | `/api/generate/brief` | Generate ONE opportunity space from a written description. |
+| `POST` | `/api/generate/briefs` | Generate one opportunity space per written brief, in a single run. |
+| `GET` | `/api/generate/chat` | The assistant's first turn, and what it can see. |
+| `POST` | `/api/generate/chat` | One turn: answer, re-retrieve, report what is still missing. |
 | `GET` | `/api/generate/jobs` | Recent runs, newest first — so a page reload does not lose the record. |
 | `GET` | `/api/generate/matching` | The opportunity spaces that ALREADY meet the criteria a run would use. |
 | `GET` | `/api/generate/options` | What the Generate screen can offer, and whether a run is possible now. |

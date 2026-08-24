@@ -82,13 +82,20 @@ class Enricher:
             terms.extend(str(v).lower() for v in values or ())
         return [t for t in terms if len(t) >= 4]
 
-    def _corroborates(self, topic: dict, signal: dict, signal_cpv: dict[str, float]) -> str | None:
+    def corroborates(self, topic: dict, signal: dict, signal_cpv: dict[str, float]) -> str | None:
         """Return the reason this signal independently supports the topic.
 
         Similarity alone is not enough: embeddings happily rate two unrelated
         cybersecurity items as close. Requiring a second, INDEPENDENT reason is
         what stops enrichment from quietly inflating every topic's signal count
         — which would corrupt exactly the components that depend on it.
+
+        Public because the scoping conversation (`radar.scoping`) asks the same
+        question of a brief before it lets anyone run one, and asking it a second
+        way would mean two definitions of "independently supports" that could
+        drift apart. `topic` is any mapping carrying `vertical`, `use_case` and
+        `technology`; a caller that wants only some of those axes considered
+        blanks the others, and an unknown id contributes no terms.
         """
         haystack = f"{signal.get('title','')} {signal.get('extract','')}".lower()
 
@@ -184,7 +191,7 @@ class Enricher:
                     signal = signals[int(idx)]
                     if signal["id"] in already:
                         continue
-                    reason = self._corroborates(dict(topic), dict(signal), signal_cpv[int(idx)])
+                    reason = self.corroborates(dict(topic), dict(signal), signal_cpv[int(idx)])
                     if reason is None and self.require_corroboration:
                         rejected_similarity_only += 1
                         continue
