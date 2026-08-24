@@ -237,6 +237,74 @@ def test_a_brief_recorded_on_another_machine_does_not_abort_the_delete(db, tmp_p
     assert report["brief_files_removed"] == 0
 
 
+def test_a_delete_never_reaches_outside_the_database_it_was_given(db, tmp_path, monkeypatch):
+    """The regression this whole guard exists for.
+
+    `resolve_brief` falls back from an absent recorded path to the same filename
+    in whatever directory the PROCESS keeps briefs in. Driven from a scratch
+    database that happens to use a real corpus filename — which the test above
+    does, `OS001-opportunity-brief.pdf` — that fallback reaches into the real
+    briefs directory and deletes a file the scratch database never owned. It did
+    exactly that, twice, before anybody noticed: the first run destroyed the
+    file and every run afterwards passed because there was nothing left.
+
+    Here the process brief directory is somewhere else entirely and holds a
+    file with the colliding name. The delete must leave it alone.
+    """
+    elsewhere = tmp_path / "the-real-corpus" / "briefs"
+    elsewhere.mkdir(parents=True)
+    innocent = elsewhere / "OS001-opportunity-brief.pdf"
+    innocent.write_bytes(b"%PDF-1.4 a brief this database does not own")
+    monkeypatch.setenv("RADAR_BRIEF_DIR", str(elsewhere))
+
+    make_space(db, "OS001")
+    # Recorded somewhere that does not exist, so the resolver falls back — and
+    # the only candidate is the file above.
+    with db.cursor() as cur:
+        cur.execute(
+            """INSERT INTO topic_briefs (opportunity_id, generated_at, topic_version, path, filename,
+                                         bytes, content_hash, weight_set, pipeline_version)
+               VALUES ('OS001', ?, 1, '/gone/OS001-opportunity-brief.pdf',
+                       'OS001-opportunity-brief.pdf', 10, 'hash', 'ws-1', '0.1.0')""", (NOW,))
+
+    # RADAR_BRIEF_DIR is set, so this one IS claimed by an operator and may go.
+    report = delete_topic(db, "OS001")
+    assert report["brief_files_removed"] == 1
+    assert not innocent.exists()
+
+
+def test_without_an_explicit_brief_directory_a_stray_filename_is_left_alone(db, tmp_path_factory,
+                                                                            monkeypatch):
+    """The same collision with nothing configured — which is the state every test
+    run and every developer shell is in. Nothing outside the database's own
+    directory may be touched.
+
+    The stand-in corpus is made with `tmp_path_factory`, which produces a SIBLING
+    of the database's directory rather than a child. That distinction is the
+    whole test: the first version of it put the decoy inside `tmp_path`, where
+    the database legitimately owns everything, and it failed for the right
+    reason."""
+    monkeypatch.delenv("RADAR_BRIEF_DIR", raising=False)
+    elsewhere = tmp_path_factory.mktemp("the-real-corpus") / "briefs"
+    elsewhere.mkdir(parents=True)
+    innocent = elsewhere / "OS001-opportunity-brief.pdf"
+    innocent.write_bytes(b"%PDF-1.4 not this database's file")
+    monkeypatch.setattr("radar.brief.brief_dir", lambda: elsewhere)
+
+    make_space(db, "OS001")
+    with db.cursor() as cur:
+        cur.execute(
+            """INSERT INTO topic_briefs (opportunity_id, generated_at, topic_version, path, filename,
+                                         bytes, content_hash, weight_set, pipeline_version)
+               VALUES ('OS001', ?, 1, '/gone/OS001-opportunity-brief.pdf',
+                       'OS001-opportunity-brief.pdf', 10, 'hash', 'ws-1', '0.1.0')""", (NOW,))
+
+    report = delete_topic(db, "OS001")
+    assert report["deleted"] is True
+    assert report["brief_files_removed"] == 0
+    assert innocent.exists(), "a delete reached outside the database it was given"
+
+
 def test_deleting_a_missing_space_raises(db):
     with pytest.raises(TopicNotFound):
         delete_topic(db, "OS404")

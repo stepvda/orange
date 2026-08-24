@@ -41,6 +41,8 @@ space is a statement about the corpus as it stands, not a permanent veto.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 from .brief import resolve_brief
@@ -69,6 +71,50 @@ DEPENDENTS: tuple[tuple[str, str, str], ...] = (
     ("topic_briefs", "opportunity_id", "sales briefs"),
     ("plan_selections", "opportunity_id", "places in a portfolio plan"),
 )
+
+
+def _owned_file(db: Database, recorded: str, resolver, env_var: str) -> Path | None:
+    """The file this row names, resolved safely enough to *unlink*.
+
+    `brief.resolve_brief` falls back from the recorded path to "same filename, in
+    the directory this PROCESS keeps briefs in". That is right for reading: a
+    brief is built by the batch job on one machine and served from another, and
+    without the fallback every download 404s on Azure.
+
+    It is wrong for deleting. The fallback is keyed on a bare filename and a
+    process-global directory, so a delete driven by one database can unlink a
+    file that database never recorded. That is not hypothetical — it is why this
+    function exists. A test that built `OS001` in a temporary database, using the
+    filename the real corpus also uses, deleted the real
+    `data/briefs/OS001-opportunity-brief.pdf`; it then passed on every later run,
+    because by then there was nothing left to delete. The same fallback removed a
+    second brief when a delete was exercised against a copy of the database made
+    for the purpose — a copy whose rows named the original's files.
+
+    So a delete only unlinks a file it can show the database owns: one inside the
+    directory tree the database itself lives in, or inside a directory an
+    operator has named explicitly. Anything else is left on disk and logged. An
+    orphaned PDF is a housekeeping problem; deleting the wrong file is not
+    recoverable.
+    """
+    candidate = resolver(recorded)
+    if candidate is None:
+        return None
+    roots = {db.path.parent.resolve()}
+    configured = os.getenv(env_var)
+    if configured:
+        # An operator who sets this is asserting where these files live for this
+        # process. Nothing in the test suite sets it, which is the point.
+        roots.add(Path(configured).resolve())
+    resolved = candidate.resolve()
+    if any(root == resolved or root in resolved.parents for root in roots):
+        return candidate
+    log.warning(
+        "Refusing to delete %s: it is outside %s, so the database being deleted "
+        "from does not own it. Left on disk.",
+        resolved, " and ".join(str(root) for root in sorted(roots)),
+    )
+    return None
 
 
 class TopicNotFound(LookupError):
@@ -196,7 +242,7 @@ def delete_topic(db: Database, topic_id: str) -> dict[str, Any]:
         for row in db.query(
             f"SELECT path FROM topic_briefs WHERE opportunity_id IN ({placeholders})", tuple(ids)
         ):
-            path = resolve_brief(row["path"])
+            path = _owned_file(db, row["path"], resolve_brief, "RADAR_BRIEF_DIR")
             if path is None:
                 continue
             try:
