@@ -1800,6 +1800,16 @@ class ChatMessageIn(BaseModel):
 
 class ScopingChatIn(BaseModel):
     messages: list[ChatMessageIn] = Field(min_length=1, max_length=MAX_MESSAGES)
+    #: What earlier turns settled, echoed back by the browser.
+    #:
+    #: The conversation is stateless by design — the transcript lives in the tab
+    #: — and this is the rest of that state. It exists because the model's own
+    #: `understood` is supposed to be cumulative and demonstrably is not: a turn
+    #: that settles the vertical will drop the use case it named a turn earlier,
+    #: and the interview then stalls on questions it has already answered.
+    #: Re-resolved against the vocabularies server-side like anything else, so a
+    #: client cannot smuggle a value past validation by putting it here.
+    understood: dict[str, Any] | None = None
 
 
 def _scoping() -> ScopingService:
@@ -1841,7 +1851,8 @@ def scoping_turn(payload: ScopingChatIn) -> dict[str, Any]:
     if (reason := _generation.encoder_reason()) is not None:
         raise HTTPException(409, reason)
     try:
-        return _scoping().reply([m.model_dump() for m in payload.messages])
+        return _scoping().reply([m.model_dump() for m in payload.messages],
+                                established=payload.understood)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except ScopingError as exc:

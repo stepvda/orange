@@ -187,7 +187,8 @@ class ScopingService:
 
     # -- one turn ------------------------------------------------------------
 
-    def reply(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def reply(self, messages: list[dict[str, str]],
+              established: dict[str, Any] | None = None) -> dict[str, Any]:
         """Answer the last thing said, and report what is still missing.
 
         The returned payload is deliberately larger than "here is a reply": the
@@ -206,9 +207,11 @@ class ScopingService:
         turns = sum(1 for m in transcript if m["role"] == "assistant")
         occupied = self._occupied_cells(evidence)
 
+        carried, _ = self._resolve(established or {})
         system = prompts.scoping_system_prompt(
             self.cfg, MIN_BRIEF_CHARS, MAX_BRIEF_CHARS, self._min_signals)
-        user = prompts.scoping_user_prompt(transcript, corpus, evidence, occupied, turns)
+        user = prompts.scoping_user_prompt(transcript, corpus, evidence, occupied, turns,
+                                           established=carried)
         try:
             raw = self._client().complete_json(
                 system, user, strong=True, temperature=0.3, max_tokens=2000)
@@ -218,6 +221,20 @@ class ScopingService:
             raise ScopingError("The model did not return a scoping object.")
 
         understood, unknown = self._resolve(raw.get("understood") or {})
+        # `understood` is supposed to be cumulative and is not.
+        #
+        # Observed: turn one settles the use case and the technology, turn two
+        # settles the vertical and SILENTLY DROPS the other two, and the
+        # assistant then asks again about a use case it named itself. The three
+        # axes are never known at once, so no brief is ever proposed and the
+        # screen has nothing on it to click — which is what "it just does not
+        # generate" turned out to mean.
+        #
+        # The prompt now shows what was established, which is the real fix. This
+        # is the belt: anything settled earlier survives a turn that forgets it,
+        # and a fresh value still wins because the person is allowed to change
+        # their mind.
+        understood = self._carry_forward(carried, understood)
         briefs = self._check_briefs(synth, raw.get("briefs") or [])
         # A conversation that has settled the three axes must always leave
         # something to act on. The model is told to propose a brief once it has
@@ -418,6 +435,19 @@ class ScopingService:
                 "hypothesis": bool(triple),
             })
         return checked
+
+    @staticmethod
+    def _carry_forward(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+        """Keep what an earlier turn settled when this one forgot it.
+
+        A new value always wins — somebody who says "actually, make it retail"
+        must be able to. Only absence defers to the past.
+        """
+        merged = dict(current)
+        for key, value in (previous or {}).items():
+            if not merged.get(key) and value:
+                merged[key] = value
+        return merged
 
     def _compose_brief(self, understood: dict[str, Any],
                        transcript: list[dict[str, str]]) -> dict[str, Any]:

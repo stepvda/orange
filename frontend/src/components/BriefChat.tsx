@@ -426,7 +426,7 @@ export default function BriefChat({
     setDraft('')
     setThinking(true)
     setError(null)
-    api.scopingTurn(next)
+    api.scopingTurn(next, turn?.understood)
       .then((answer) => {
         setTurn(answer)
         setMessages([...next, { role: 'assistant', content: answer.reply }])
@@ -447,7 +447,7 @@ export default function BriefChat({
         setThinking(false)
         inputRef.current?.focus()
       })
-  }, [messages, thinking])
+  }, [messages, thinking, turn])
 
   const briefs = turn?.briefs ?? []
   const textFor = useCallback(

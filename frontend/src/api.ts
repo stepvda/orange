@@ -320,8 +320,12 @@ export const api = {
   /** One turn. The reply carries the retrieval and the readiness verdict as
    *  well as the words, because the screen shows all three — a chat bubble on
    *  its own would hide the part that makes this different from a text box. */
-  scopingTurn: (messages: ChatMessage[]) =>
-    post<ScopingTurn>('/generate/chat', { messages }),
+  /** `understood` is the rest of the conversation's state. The transcript is
+   *  not enough on its own: the model's own cumulative slots are not reliably
+   *  cumulative, so what earlier turns settled is echoed back and merged
+   *  server-side. It is re-validated there, so this is a hint, not a bypass. */
+  scopingTurn: (messages: ChatMessage[], understood?: ScopingTurn['understood']) =>
+    post<ScopingTurn>('/generate/chat', { messages, understood }),
 
   generationJob: (id: string) => get<GenerationJob>(`/generate/${id}`),
 

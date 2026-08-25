@@ -1428,7 +1428,7 @@ def format_signals_for_support(signals: list[dict[str, Any]]) -> str:
 
 def scoping_user_prompt(transcript: list[dict[str, str]], corpus: dict[str, Any],
                         evidence: dict[str, Any], occupied: list[str],
-                        turns_taken: int) -> str:
+                        turns_taken: int, established: dict[str, Any] | None = None) -> str:
     """Everything the assistant is allowed to know, this turn.
 
     Three blocks, in order of how much they should influence the question: what
@@ -1487,6 +1487,17 @@ def scoping_user_prompt(transcript: list[dict[str, str]], corpus: dict[str, Any]
         lines.append("TAXONOMY CELLS ALREADY OCCUPIED near this conversation (DR-03: a run landing "
                      "on one of these REFRESHES that space, it does not create a new one)")
         lines += [f"  {cell}" for cell in occupied]
+
+    if established and any(established.values()):
+        lines.append("")
+        lines.append("ALREADY ESTABLISHED — carry every one of these into `understood`")
+        lines.append("These were settled on earlier turns and are NOT open questions. Re-asking "
+                     "about any of them reads as not listening, and dropping one from `understood` "
+                     "un-settles it and stalls the interview.")
+        for key, value in established.items():
+            if value:
+                shown = ", ".join(value) if isinstance(value, list) else value
+                lines.append(f"  {key}: {shown}")
 
     lines.append("")
     lines.append(f"THE CONVERSATION SO FAR (you have taken {turns_taken} turn(s))")

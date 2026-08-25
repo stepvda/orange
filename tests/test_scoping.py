@@ -319,6 +319,61 @@ def test_ready_is_refused_when_the_model_proposes_no_brief_at_all(cfg, db):
     assert service.reply([{"role": "user", "content": "offshore wind"}])["ready"] is False
 
 
+def test_a_slot_settled_earlier_survives_a_turn_that_forgets_it(cfg, db):
+    """The bug behind "it just does not generate".
+
+    Observed against the live radar: turn one settled the use case and the
+    technology, turn two settled the vertical and silently dropped both of the
+    others, and the assistant then asked again about a use case it had named
+    itself. The three axes were never known at once, so no brief was ever
+    proposed and the screen had nothing on it to click.
+    """
+    _seed(db)
+    forgetful = _reply(understood={"vertical": "energy"})   # drops the other two
+    service, _ = _service(cfg, db, forgetful)
+    out = service.reply(
+        [{"role": "user", "content": "offshore wind gearbox monitoring"}],
+        established={"use_case": "predictive_maintenance", "technology": "low_power_sensors"},
+    )
+    u = out["understood"]
+    assert u["vertical"] == "energy", "this turn's answer"
+    assert u["use_case"] == "predictive_maintenance", "carried from an earlier turn"
+    assert u["technology"] == "low_power_sensors"
+    assert out["missing"] == [], "so nothing is still outstanding"
+    assert len(out["briefs"]) == 1, "and a brief exists to act on"
+
+
+def test_a_fresh_answer_beats_the_carried_one(cfg, db):
+    """Somebody who says "actually, make it retail" must be able to."""
+    _seed(db)
+    service, _ = _service(cfg, db, _reply(understood={"vertical": "retail"}))
+    out = service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}],
+                        established={"vertical": "energy"})
+    assert out["understood"]["vertical"] == "retail"
+
+
+def test_what_was_established_reaches_the_prompt(cfg, db):
+    """The merge is the safety net; showing the model what is settled is the fix.
+    It forgets because it is re-deriving from the transcript every turn."""
+    _seed(db)
+    service, llm = _service(cfg, db, _reply())
+    service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}],
+                  established={"use_case": "predictive_maintenance"})
+    user = next(u for sy, u in llm.seen if "MOCK_KIND=scoping" in sy)
+    assert "ALREADY ESTABLISHED" in user
+    assert "predictive_maintenance" in user
+
+
+def test_a_carried_slot_is_still_validated(cfg, db):
+    """The browser sends it, so it is not trusted: a value outside the closed
+    vocabulary must not reach a brief just because it arrived by this door."""
+    _seed(db)
+    service, _ = _service(cfg, db, _reply())
+    out = service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}],
+                        established={"vertical": "underwater basket weaving"})
+    assert out["understood"]["vertical"] is None
+
+
 def test_a_settled_conversation_always_leaves_a_brief_to_act_on(cfg, db):
     """The complaint this exists for: "it often fails for an unclear reason".
 
