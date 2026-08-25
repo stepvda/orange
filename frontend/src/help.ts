@@ -254,9 +254,24 @@ export const HELP: Record<string, HelpEntry> = {
     title: 'Filtering',
     ref: 'AC-04, FR-12',
     body: [
-      'Multi-select on vertical, geography, domain, persona and horizon, plus free-text search across statements and claims.',
+      'Multi-select on vertical, market cluster, country, domain, persona and horizon, plus free-text search across statements and claims.',
       'Selections within one dimension are a union; different dimensions combine as an intersection.',
       'A topic with no geography is treated as global rather than excluded.',
+    ],
+  },
+
+  market_clusters: {
+    title: 'Market clusters',
+    ref: 'Orange Business grouping, 25 Aug 2026',
+    body: [
+      '**The grouping Orange sells in, not the one the map draws.** Benelux, Germany, Southern Europe, DACH, UK & Ireland, Nordics and Eastern Europe were supplied by Orange Business; the rest of the world is Africa, Americas, Asia and Oceania. Israel sits in Southern Europe because that is how it is sold, which is the whole point of clustering by market rather than by geography.',
+      '**DACH here is Switzerland and Austria — Germany is its own cluster.** That is what Orange supplied, and it is deliberate rather than an oversight: the mail lists "Germany – Germany" and "DACH – Switzerland, Austria" as two entries. It departs from the usual reading of the acronym, so the filter spells out every cluster\'s membership underneath its name, and a test pins it against a well-meaning correction.',
+      '**Derived, never stored.** A cluster is a reading of the ISO codes a signal already carries (§2.6 attaches geography to signals, not only to topics). Nothing is written to the database, so re-grouping a country is a one-line change to `clusters.yaml` that takes effect on the next request, with no migration and no re-scoring. Scores are untouched by clustering — it is a lens, not an input.',
+      '**Ticking a cluster ticks the countries in it.** A cluster is its countries, so the Country group below fills in to match — and the countries stay independently toggleable afterwards, so you can drop one without leaving the cluster. Unticking the cluster releases them again, except any a second selected cluster still claims. With the countries ticked, a cluster filters to exactly what those countries filter to.',
+      '**Being about a cluster and reaching one are different things.** A third of the corpus is tagged EU and nothing else. Those topics are attributed to no single cluster, so they show no cluster on the card — claiming an EU directive is "about France" would overstate it. They still appear when you filter on any European cluster, because the evidence genuinely bears on all of them. An EU-wide topic will not appear under Asia. This is also why clearing the countries while leaving the cluster ticked *widens* the result rather than narrowing it: with no country named, EU-wide evidence counts again.',
+      '**Clusters marked \\* are still our reading, not Orange\'s.** The membership behind "Eastern European markets" is inferred from what the corpus contains — the Balkans, the EU\'s eastern neighbourhood, and the transcontinental codes that would otherwise be stranded. It can be corrected in one line without touching code.',
+      '**France is its own cluster by decision, not by quotation.** It was not in the grouping Orange supplied — which listed seven clusters and no France — and it is the third-largest source of evidence in the corpus and Orange\'s home market, so letting it fall into "Europe (other)" would have been visibly wrong. It is modelled on the Germany entry and carries no asterisk because the question was settled, but it is recorded as `confirmed` rather than `email` so the file never claims the client wrote something they did not.',
+      '**What the clusters do not cover is counted.** Coverage reports EU/UN-wide evidence separately, and lists any country code no cluster claims — usually a malformed code from extraction, left unmapped rather than guessed at, so the extraction bug stays visible instead of quietly becoming evidence about a country nobody wrote down.',
     ],
   },
 

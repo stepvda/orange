@@ -396,6 +396,13 @@ export default function TopicDetail({ topicId, role, meta, rank, workflowMeta, o
         {([
           ['Business domain', topic.domain_labels],
           ['Who signs', topic.persona_labels],
+          /* The cluster sits above the country codes because it is the unit the
+             business plans in, and because it is derived from them: showing the
+             reading before the raw codes lets a reader check one against the
+             other. Empty for a topic whose only evidence is EU-wide — that is
+             not the same as "nowhere", so it says so rather than showing a
+             cluster the evidence does not support. */
+          ['Market cluster', topic.market_cluster_labels],
           ['Where', topic.geographies],
         ] as [string, string[]][]).map(([label, values]) => (
           <div className="labelled-badges" key={label}>

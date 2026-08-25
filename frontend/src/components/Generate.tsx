@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { HelpButton } from './Help'
 import BriefChat from './BriefChat'
+import { countryNames } from '../geo'
 import type {
   GenerateAnywayRequest, GenerationConstraints, GenerationJob, GenerationMatch,
   GenerationOptions, HypothesisRequest, Meta, Topic,
@@ -497,6 +498,22 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
     [options],
   )
 
+  // Cluster counts come from the server already rolled up over member codes, so
+  // the hint says how much evidence a cluster actually has rather than implying
+  // that ticking it is the same as ticking one country.
+  const marketClusters = useMemo(
+    () => (options?.market_clusters ?? [])
+      .filter((c) => c.signals > 0 || c.spaces > 0)
+      .map((c) => ({
+        id: c.id,
+        label: c.source === 'extension' ? `${c.label} *` : c.label,
+        hint: `${countryNames(c.countries, 99).full || 'no codes in the corpus'} — ${c.signals} signal`
+          + `${c.signals === 1 ? '' : 's'}, ${c.spaces} existing space${c.spaces === 1 ? '' : 's'}`
+          + `${c.source === 'extension' ? ' · grouping inferred, not supplied by Orange' : ''}`,
+      })),
+    [options],
+  )
+
   const blocked = options ? !options.ready : false
 
   return (
@@ -628,7 +645,14 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
           </p>
 
           <ConstraintGroup
-            title="Geography"
+            title="Market cluster"
+            note="Orange Business go-to-market grouping. Expanded server-side into its member ISO codes and unioned with anything picked under Country, so scoping by cluster is exactly scoping by the countries in it — the preview count below already reflects that expansion. A cluster marked * is our reading of the corpus rather than a grouping Orange supplied."
+            items={marketClusters}
+            selected={constraints.market_clusters}
+            onToggle={toggle('market_clusters')}
+          />
+          <ConstraintGroup
+            title="Country"
             note="Read from the corpus, not the taxonomy: geography rides on signals (§2.6). Selecting some restricts the run to theme clusters that carry evidence actually tagged with those codes — deliberately strict, since a model asked for Germany and handed French tenders invents rather than declines. It can leave the run much less evidence than the whole corpus; the run log says how much."
             items={geographies}
             selected={constraints.geographies}

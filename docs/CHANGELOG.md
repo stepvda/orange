@@ -6,6 +6,81 @@ features that exposed them.
 
 ---
 
+## Market clusters: the radar groups countries the way Orange sells them
+
+**Added.** Orange Business supplied its cluster grouping (Karol Fic, 25 Aug 2026)
+— Benelux, Germany, Southern Europe, DACH, UK & Ireland, Nordics and Eastern
+Europe — and the rest of the world is Africa, Americas, Asia and Oceania. Twelve
+clusters with France. The radar now carries them as a first-class dimension: a
+filter above Country, a line on every card, a row in the detail pane, a bar
+chart, a column in Coverage, and a scope control on Generate.
+
+* **Ticking a cluster ticks its countries.** The Country group fills in to
+  match, so the rail says what "Nordics" stands for instead of leaving the
+  reader to work it out, and a cluster filters to exactly what its countries
+  filter to. Unticking releases them, except any a second selected cluster still
+  claims.
+* **The names are spelled out where they are offered.** "DACH" and "Benelux"
+  name nothing to a reader who does not already know them, so each cluster row
+  carries its membership on a second line, with the full list on the tooltip.
+  Country names come from the platform's own CLDR data rather than a table we
+  would have to keep current.
+* **DACH is Switzerland and Austria; Germany is its own cluster.** That is what
+  Orange supplied, and it departs from the usual reading of the acronym, so it
+  is pinned by a test — a later editor "restoring" Germany to DACH would be
+  correcting the client rather than fixing a typo.
+
+**Fixed.** Two defects in the first cut of the rail, both found from a
+screenshot rather than from the tests:
+
+* **Half the clusters were missing.** The rail listed only clusters present in
+  the *capped* result page, so Benelux, DACH, Nordics, Eastern Europe and Africa
+  were simply absent. Every other dimension passes its full vocabulary through
+  and lets the component grey out the zeroes; this one second-guessed it. A
+  control that disappears cannot be used to look for what is missing.
+* **A selected country could vanish from the rail.** The country list was built
+  from the visible topics only, so narrowing until nothing carried a selected
+  code left it filtering invisibly, with no row to untick. The list now includes
+  whatever is selected, which also lets a cascaded tick be seen.
+
+* **Derived, never stored.** A cluster is a reading of the ISO codes a signal
+  already carries (§2.6). No column, no migration, no re-scoring — re-grouping a
+  country is one line in `config/taxonomy/clusters.yaml` and takes effect on the
+  next request. Scores are untouched: clustering is a lens, not an input.
+* **Attribution and reach are separated**, and the difference is load-bearing. A
+  third of the corpus is tagged `EU` and nothing else. Those topics belong to no
+  single cluster, so they show no cluster — calling an EU directive "about
+  France" overclaims. They still *match* every European cluster when filtered,
+  because the evidence genuinely bears on all of them. The first implementation
+  filtered on attribution, and because an empty set matches everything, EU-wide
+  evidence surfaced under **Asia** and **Oceania**; caught by asserting that a
+  cluster filter equals a filter over that cluster's member countries.
+* **France is a cluster by decision, not by quotation.** It was not in the
+  supplied grouping — seven clusters, no France — and it is the third-largest
+  source of evidence in the corpus and Orange's home market, so leaving it to
+  fall into "Europe (other)" would have been visibly wrong. Raised as an open
+  question and settled by the project owner on 25 Aug 2026: France is its own
+  cluster, modelled on the Germany entry. It is recorded as `source: confirmed`
+  rather than `email`, because the decision is right and it still did not come
+  from the client's own mail. The UI's asterisk marks only what remains our own
+  reading — the continents, and the membership behind "Eastern European markets".
+
+**Fixed / found.** Two data defects the new dimension exposed rather than caused:
+
+* **`NO` is not Norway in YAML.** YAML 1.1 reads a bare `NO` as boolean false,
+  which silently dropped Norway from the Nordics. Caught at load by the
+  ISO-shape check rather than in a chart three screens away — the same trap
+  `sizing.yaml` already quotes around.
+* **`AF` means Africa in this corpus, and Afghanistan in ISO 3166-1.** Every one
+  of the six topics carrying it means Africa (OS348 "rural Africa"; OS195
+  alongside NG, ZA, TN). Resolving it either way files real topics under a
+  continent nobody wrote down, so it maps to nothing and is counted under
+  "outside the cluster map". The fix belongs upstream, in whatever emitted a
+  continent where an ISO code was asked for. `APAC`, which has one reading, is
+  resolved instead of reported.
+
+---
+
 ## The documentation set catches up with the product
 
 **Changed.** Four features had shipped without reaching the design documents at

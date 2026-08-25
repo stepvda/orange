@@ -1,0 +1,180 @@
+# Orange Business market clusters — the grouping the business actually sells in.
+#
+# Source: Karol Fic (Orange Business), 25 August 2026, in answer to a direct
+# question about how clusters are grouped; the rest-of-world continents and the
+# handling of France were settled with the project owner on the same day.
+#
+# Every id records where it came from, so a reader can tell what the client wrote
+# from what was decided afterwards, and so either can be corrected here without
+# touching code:
+#   email      quoted from Karol's mail
+#   confirmed  not in the mail; settled by the project owner
+#   extension  still our reading of the corpus, and marked * in the interface
+#
+# These are a CONTROLLED VOCABULARY in the same sense as verticals: a cluster is
+# derived from the ISO codes already on a signal (§2.6 attaches geography to
+# signals, not only to topics), never stored as a second copy of the truth.
+# Change a country's cluster here and every view follows on the next request.
+#
+# NOTE ON THE WORD "CLUSTER". `clusters` in db.py means something else entirely:
+# theme clusters from stage-4 signal clustering. These are market clusters and
+# are addressed as `market_cluster` in code to keep the two apart.
+version: "2026-08-b"
+owner: "taxonomy-curator"
+
+# Codes that are not countries. They span clusters rather than belonging to one,
+# and which clusters they span is the whole question: a third of the corpus is
+# tagged EU and nothing else, so getting this wrong puts an EU directive under
+# "Asia". Each entry says what it reaches. `global: true` means it reaches
+# everything and is treated the way a topic with no geography already is.
+#
+# A cluster is listed under EU when ANY of its members is an EU member state,
+# which is why DACH (Austria) and UK & Ireland (Ireland) are in. The
+# approximation is deliberate and is why `spans` is written out rather than
+# computed: at cluster granularity there is no exact answer, so the inexact one
+# should at least be visible and editable.
+supranational:
+  EU:
+    label: European Union
+    spans: [benelux, germany, southern_europe, dach, uk_ireland, nordics,
+            eastern_europe, france]
+  UN:
+    label: Global
+    global: true
+  APAC:
+    label: Asia-Pacific
+    # Emitted by synthesis as a region rather than a country. Unambiguous, unlike
+    # the malformed codes below, so it is resolved rather than reported.
+    spans: [asia, oceania]
+
+# Only unambiguous spelling repairs belong here. UK is not officially assigned in
+# ISO 3166-1 but is reserved for the United Kingdom and appears in the corpus.
+# Codes like TU, JA, HO and SW look like near-misses for TR, JP, HN and SE, but
+# guessing would invent evidence: they are left unmapped and counted, so the
+# extraction bug that produced them stays visible instead of being papered over.
+aliases:
+  UK: GB
+
+items:
+  # -- The seven Karol named, in the order he gave them -------------------------
+  #
+  # No dependencies or microstates are padded in (LI, MC, FO, GL, AX, AD, SM,
+  # VA). None of them appears anywhere in the corpus, none is a distinct Orange
+  # market, and each one changed how a cluster READS without changing anything it
+  # matches — "DACH: Switzerland, Austria, Liechtenstein" against a mail that
+  # says "DACH – Switzerland, Austria". If one ever turns up in the evidence it
+  # will be reported as unmapped, which is where a country nobody has placed
+  # belongs.
+  - id: benelux
+    label: Benelux
+    source: email
+    countries: [NL, BE, LU]
+
+  - id: germany
+    label: Germany
+    source: email
+    countries: [DE]
+
+  - id: southern_europe
+    label: Southern Europe
+    source: email
+    # The mail names IT, ES, PT and IL. Israel is not southern Europe by
+    # geography; it is in this cluster because Orange sells it there, which is
+    # the whole point of clustering by market rather than by map.
+    countries: [IT, ES, PT, IL]
+    # In the corpus, unnamed by the mail, and Mediterranean EU members: placed
+    # here rather than left unmapped.
+    extensions: [GR, CY, MT]
+
+  - id: dach
+    label: DACH
+    source: email
+    # DACH conventionally means Germany-Austria-Switzerland. The mail lists
+    # Germany as its own cluster and DACH as "Switzerland, Austria", and that
+    # split was reviewed and kept deliberately — so DE is NOT here. The label is
+    # the client's; so is the membership. A later editor "restoring" Germany to
+    # this cluster would be correcting the client, not a typo. Pinned by a test.
+    countries: [CH, AT]
+
+  - id: uk_ireland
+    label: UK & Ireland
+    source: email
+    countries: [GB, IE]
+
+  - id: nordics
+    label: Nordics
+    source: email
+    countries: ["NO", SE, DK, FI, IS]   # NO is quoted: YAML 1.1 reads a bare NO as boolean false
+
+  - id: eastern_europe
+    label: Eastern Europe
+    source: email
+    # The mail says "Eastern European markets" without naming them. This is that
+    # phrase made concrete. The Baltics sit here rather than with the Nordics
+    # because the mail lists the Nordics explicitly and they are not in it.
+    countries: [PL, CZ, SK, HU, RO, BG, HR, SI, EE, LV, LT]
+    # The Balkans and the EU's eastern neighbourhood. TR, RU and the Caucasus are
+    # transcontinental and could be read as Asia; they are here because the
+    # evidence carrying them is European-regulatory, and because the alternative
+    # is filing European tenders under a continent nobody searched. Membership of
+    # this cluster is a routing decision for evidence, not a market claim.
+    extensions: [RS, UA, BY, MD, BA, MK, AL, ME, XK, TR, RU, GE, AM, AZ]
+
+  # -- France ------------------------------------------------------------------
+  - id: france
+    label: France
+    # Not in Karol's mail, which listed seven clusters and no France. Confirmed
+    # as its own cluster by the project owner on 25 Aug 2026: France is the
+    # third-largest source of evidence in the corpus and Orange's home market, so
+    # it could not be left to fall through to a continent. Modelled on the
+    # Germany entry, which establishes that a single large market may be its own
+    # cluster. `confirmed` rather than `email` because the decision is right and
+    # it still did not come from the client's own mail.
+    source: confirmed
+    countries: [FR]
+
+  # -- Rest of world: the four continents ---------------------------------------
+  # Karol's mail said to "simplify it to the continents in general"; the four
+  # below are the list settled with the project owner. Americas is one cluster,
+  # not a North/South split, and there is no separate "Europe (other)" — the
+  # European codes no named cluster claims are routed above.
+  - id: africa
+    label: Africa
+    source: confirmed
+    scope: continent
+    countries: [ZA, NG, KE, EG, MA, TN, DZ, GH, CI, SN, ET, TZ, UG, CM, ZM, ZW,
+                AO, MZ, BW, NA, RW, ML, BF, NE, TD, SO, SD, SS, LY, CD, CG, GA,
+                MU, MG, MW, BJ, TG, GN, SL, LR, MR, GM, BI, ER, DJ, SZ, LS, CV]
+
+  - id: americas
+    label: Americas
+    source: confirmed
+    scope: continent
+    countries: [US, CA, MX, BR, AR, CL, CO, PE, EC, VE, UY, PY, BO, CR, PA, NI,
+                HN, GT, SV, DO, CU, JM, TT, SR, GY, BZ, HT, VI, PR, BS, BB]
+
+  - id: asia
+    label: Asia
+    source: confirmed
+    scope: continent
+    # Includes the Middle East. The instruction is to simplify the rest of the
+    # world to continents, and Middle East is not one; splitting it out would be
+    # our invention. Israel is the exception and sits in Southern Europe because
+    # the mail puts it there explicitly.
+    #
+    # AF is deliberately absent. ISO 3166-1 assigns it to Afghanistan, but every
+    # occurrence in this corpus means Africa — OS348 says "rural Africa", OS195
+    # pairs it with NG, ZA and TN. Mapping it to Asia would file six African
+    # topics under the wrong continent; mapping it to Africa would encode a
+    # falsehood about the standard and mis-file a real Afghan signal later. It is
+    # left unmapped so it is counted and shown under "outside the cluster map",
+    # where it reads as the extraction bug it is.
+    countries: [CN, IN, JP, KR, SG, MY, TH, VN, PH, ID, TW, HK, MO, PK, BD, LK,
+                NP, KZ, UZ, KG, TJ, TM, MN, KH, LA, MM, BN, BT, MV,
+                AE, SA, QA, KW, BH, OM, JO, LB, IQ, IR, YE, SY, PS]
+
+  - id: oceania
+    label: Oceania
+    source: confirmed
+    scope: continent
+    countries: [AU, NZ, FJ, PG, NC, PF, SB, VU, WS, TO]

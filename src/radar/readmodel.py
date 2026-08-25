@@ -292,6 +292,25 @@ class ReadModel:
             "personas": unjs(topic["personas"], []),
             "persona_labels": [self.cfg.personas.label(p) for p in unjs(topic["personas"], []) or []],
             "geographies": unjs(topic["geographies"], []),
+            # Derived, not stored: the ISO codes above are the truth and a
+            # cluster is a reading of them (Orange Business grouping).
+            "market_clusters": self.cfg.market_clusters.clusters_for(
+                unjs(topic["geographies"], []) or []
+            ),
+            "market_cluster_labels": [
+                self.cfg.market_clusters.label(c)
+                for c in self.cfg.market_clusters.clusters_for(
+                    unjs(topic["geographies"], []) or []
+                )
+            ],
+            # What it is ABOUT versus who should SEE it. A third of the corpus is
+            # tagged EU and nothing else: those topics are attributed to no
+            # cluster (above) but must still reach a planner filtering on France,
+            # which is what this carries. Kept in the payload rather than hidden
+            # so the filter's behaviour can be read off the data it filters.
+            "market_cluster_reach": self.cfg.market_clusters.reach_for(
+                unjs(topic["geographies"], []) or []
+            ),
             "state": topic["state"],
             "state_reason": topic["state_reason"],
             "horizon": topic["horizon"],
@@ -652,9 +671,24 @@ class ReadModel:
             "SELECT source_id, COUNT(*) AS n FROM signals GROUP BY source_id ORDER BY n DESC"
         )
         geo: dict[str, int] = {}
+        clusters: dict[str, int] = {}
+        supranational = 0
+        unmapped: dict[str, int] = {}
+        mc = self.cfg.market_clusters
         for row in self.db.query("SELECT geographies FROM signals"):
             for code in unjs(row["geographies"], []) or []:
                 geo[code] = geo.get(code, 0) + 1
+                if mc.is_supranational(code):
+                    supranational += 1
+                elif cluster := mc.cluster_for(code):
+                    clusters[cluster] = clusters.get(cluster, 0) + 1
+                else:
+                    # Named rather than absorbed. These are extraction bugs (TU
+                    # for TR, JA for JP) and countries the taxonomy has not
+                    # caught up with; a cluster chart that quietly dropped them
+                    # would read as full coverage of a corpus it did not cover.
+                    norm = mc.normalise(code)
+                    unmapped[norm] = unmapped.get(norm, 0) + 1
         verticals = self.db.query(
             "SELECT vertical, COUNT(*) AS n FROM opportunity_spaces WHERE merged_into IS NULL "
             "GROUP BY vertical ORDER BY n DESC"
@@ -665,6 +699,14 @@ class ReadModel:
             "signal_types": {r["signal_type"] or "unclassified": r["n"] for r in types},
             "sources": {r["source_id"]: r["n"] for r in sources},
             "geographies": dict(sorted(geo.items(), key=lambda kv: -kv[1])[:25]),
+            "market_clusters": {
+                mc.label(k): v
+                for k, v in sorted(clusters.items(), key=lambda kv: -kv[1])
+            },
+            "market_cluster_gaps": {
+                "supranational": supranational,
+                "unmapped": dict(sorted(unmapped.items(), key=lambda kv: -kv[1])),
+            },
             "topics_per_vertical": {r["vertical"]: r["n"] for r in verticals},
             "competitors": self._competitor_coverage(),
         }
@@ -757,7 +799,7 @@ def _facets(topics: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     """How many topics each filter value would leave, across the whole result set."""
     facets: dict[str, dict[str, int]] = {
         "vertical": {}, "domain": {}, "persona": {}, "geography": {},
-        "horizon": {}, "state": {}, "competition": {},
+        "market_cluster": {}, "horizon": {}, "state": {}, "competition": {},
     }
 
     def bump(dimension: str, value: str | None) -> None:
@@ -775,6 +817,8 @@ def _facets(topics: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
             bump("persona", persona)
         for geography in topic.get("geographies") or []:
             bump("geography", geography)
+        for cluster in topic.get("market_clusters") or []:
+            bump("market_cluster", cluster)
     facets["with_brief"] = {"true": sum(1 for t in topics if t.get("has_brief"))}
     return facets
 
@@ -842,6 +886,15 @@ def _matches(topic: dict[str, Any], filters: dict[str, Any]) -> bool:
         topic_geo = set(topic["geographies"])
         # A topic with no geography is global, not excluded.
         if topic_geo and not (topic_geo & set(geographies)):
+            return False
+    if clusters := filters.get("market_cluster"):
+        # Reach, not attribution: an EU-wide directive is attributed to no single
+        # cluster but is relevant to every European one, and filtering on the
+        # attributed set would have shown it under Asia (empty set matches
+        # everything) instead. A genuinely empty reach — no geography, or a
+        # global code — still matches, which is the rule geography already uses.
+        reach = set(topic.get("market_cluster_reach") or [])
+        if reach and not (reach & set(clusters)):
             return False
     if (horizons := filters.get("horizon")) and topic["horizon"] not in horizons:
         return False

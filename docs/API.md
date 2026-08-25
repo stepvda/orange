@@ -63,9 +63,9 @@ set of passwords nor a set of live sessions.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/coverage` | Language, geography, tier and source coverage as a reported metric (NFR-08). |
+| `GET` | `/api/coverage` | Language, geography, market-cluster, tier and source coverage as a reported metric (NFR-08). |
 | `GET` | `/api/orphan-offers` | Offers with no live opportunity space — a portfolio-decay signal (FR-33). |
-| `GET` | `/api/view` | The capped, filtered, role-ranked radar view (FR-13, FR-21, FR-22, AC-05). |
+| `GET` | `/api/view` | The capped, filtered, role-ranked radar view (FR-13, FR-21, FR-22, AC-05). Accepts `market_cluster` alongside `geography`; a topic matches a cluster when its evidence *reaches* it, so EU-wide evidence matches every European cluster and no other. |
 | `GET` | `/api/whitespace` | High attractiveness, no path from the portfolio (FR-32, §4.5.5). |
 
 ## Pre-sales collateral

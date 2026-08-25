@@ -24,6 +24,17 @@ export interface LinkTypeInfo {
   action: string
 }
 
+export interface MarketCluster {
+  id: string
+  label: string
+  countries: string[]
+  /** 'email' = named by Orange; 'confirmed' = settled by the project owner but
+   *  not in Orange's own mail; 'extension' = still our reading of the corpus.
+   *  Only 'extension' is marked with an asterisk in the UI. */
+  source: 'email' | 'confirmed' | 'extension'
+  scope: string
+}
+
 export interface Meta {
   verticals: VocabItem[]
   use_cases: VocabItem[]
@@ -31,6 +42,9 @@ export interface Meta {
   domains: VocabItem[]
   personas: VocabItem[]
   signal_types: VocabItem[]
+  /** Orange Business go-to-market grouping. `source` says whether Orange
+   *  named the cluster or we inferred it, so the UI can mark the difference. */
+  market_clusters: MarketCluster[]
   horizons: string[]
   states: string[]
   link_types: LinkTypeInfo[]
@@ -398,6 +412,12 @@ export interface Topic {
   personas: string[]
   persona_labels: string[]
   geographies: string[]
+  /** Clusters this topic is ABOUT, from its own country codes. Drives chips. */
+  market_clusters: string[]
+  market_cluster_labels: string[]
+  /** Clusters this topic REACHES, adding what a supranational code spans.
+   *  Wider than the above for EU-wide evidence; drives filtering. */
+  market_cluster_reach: string[]
   state: string
   state_reason: string
   horizon: string | null
@@ -460,6 +480,8 @@ export interface Coverage {
   signal_types: Record<string, number>
   sources: Record<string, number>
   geographies: Record<string, number>
+  market_clusters: Record<string, number>
+  market_cluster_gaps: { supranational: number; unmapped: Record<string, number> }
   topics_per_vertical: Record<string, number>
   /** What the competitive picture is missing, reported rather than inferred
    *  from an empty panel. Three separate gaps that compound. */
@@ -481,6 +503,7 @@ export type FilterState = {
   domain: string[]
   persona: string[]
   geography: string[]
+  market_cluster: string[]
   horizon: string[]
   /** §4.3.3 — filter on how crowded the field is. */
   competition: string[]
@@ -490,7 +513,7 @@ export type FilterState = {
 }
 
 export const EMPTY_FILTERS: FilterState = {
-  vertical: [], domain: [], persona: [], geography: [], horizon: [],
+  vertical: [], domain: [], persona: [], geography: [], market_cluster: [], horizon: [],
   competition: [], has_brief: false, q: '',
 }
 
@@ -510,22 +533,29 @@ export type SortId = 'rank' | 'market_size' | 'attractiveness' | 'right_to_win'
 
 export interface GenerationConstraints {
   geographies: string[]
+  /** Expanded server-side into member ISO codes and unioned with `geographies`,
+   *  so scoping a run by cluster is exactly scoping it by the countries in it. */
+  market_clusters: string[]
   verticals: string[]
   horizons: string[]
   domains: string[]
 }
 
 export const EMPTY_CONSTRAINTS: GenerationConstraints = {
-  geographies: [], verticals: [], horizons: [], domains: [],
+  geographies: [], market_clusters: [], verticals: [], horizons: [], domains: [],
 }
 
 export function constraintCount(c: GenerationConstraints): number {
-  return c.geographies.length + c.verticals.length + c.horizons.length + c.domains.length
+  return c.geographies.length + c.market_clusters.length + c.verticals.length
+    + c.horizons.length + c.domains.length
 }
 
 export interface GenerationOptions {
   /** Read from the corpus, not from config — geography rides on signals (§2.6). */
   geographies: { id: string; signals: number; spaces: number }[]
+  market_clusters: { id: string; label: string; countries: string[]
+                     source: string; signals: number; spaces: number }[]
+  unmapped_geographies: string[]
   total_live: number
   clusters: number
   clustered_signals: number
