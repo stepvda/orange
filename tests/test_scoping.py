@@ -319,6 +319,52 @@ def test_ready_is_refused_when_the_model_proposes_no_brief_at_all(cfg, db):
     assert service.reply([{"role": "user", "content": "offshore wind"}])["ready"] is False
 
 
+def test_a_settled_conversation_always_leaves_a_brief_to_act_on(cfg, db):
+    """The complaint this exists for: "it often fails for an unclear reason".
+
+    The model is told to propose a brief once the three axes are settled, and
+    mostly does — but a turn that resolves all three and then offers nothing
+    reads as a refusal with no stated cause, and leaves nowhere to click. So the
+    server composes one from the conversation rather than returning an empty
+    screen.
+    """
+    _seed(db)
+    settled = {"vertical": "energy", "use_case": "predictive_maintenance",
+               "technology": "low_power_sensors"}
+    service, _ = _service(cfg, db, _reply(understood=settled, briefs=[]))
+    out = service.reply([
+        {"role": "user", "content": "gearbox failures on offshore wind turbines in the North Sea"},
+        {"role": "assistant", "content": "Which technology?"},
+        {"role": "user", "content": "acoustic and vibration sensors with a machine learning model"},
+    ])
+    assert len(out["briefs"]) == 1, "the server composed one"
+    brief = out["briefs"][0]
+    assert (brief["vertical"], brief["use_case"], brief["technology"]) == (
+        "energy", "predictive_maintenance", "low_power_sensors")
+    assert "acoustic and vibration sensors" in brief["description"], "in the person's own words"
+    assert brief["hypothesis"] is True, "and it carries a route"
+
+
+def test_nothing_is_composed_while_the_axes_are_still_open(cfg, db):
+    """A brief invented before the interview has settled would be the screen
+    guessing, which is the opposite of what the conversation is for."""
+    _seed(db)
+    service, _ = _service(cfg, db, _reply(understood={"vertical": "energy"}, briefs=[]))
+    out = service.reply([{"role": "user", "content": "something about wind turbines"}])
+    assert out["briefs"] == []
+
+
+def test_the_second_route_stays_open_on_a_brief_the_corpus_carries(cfg, db):
+    """A runnable brief is not a guaranteed space — the run log's commonest
+    ending is a candidate the critic threw out. Someone who has just watched a
+    finished run create nothing needs the other route to still be there."""
+    _seed(db)
+    service, _ = _service(cfg, db, _reply(ready=True, briefs=[_brief()]))
+    brief = service.reply([{"role": "user", "content": "offshore wind gearbox monitoring"}])["briefs"][0]
+    assert brief["runnable"] is True
+    assert brief["hypothesis"] is True
+
+
 def test_a_brief_too_short_to_retrieve_with_is_reported_not_dropped(cfg, db):
     """"Nearly right, and here is what is wrong" is the outcome worth having —
     it is the only version that tells someone what to say next."""

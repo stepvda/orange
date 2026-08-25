@@ -219,6 +219,14 @@ class ScopingService:
 
         understood, unknown = self._resolve(raw.get("understood") or {})
         briefs = self._check_briefs(synth, raw.get("briefs") or [])
+        # A conversation that has settled the three axes must always leave
+        # something to act on. The model is told to propose a brief once it has
+        # them and mostly does, but "mostly" is the whole complaint: a turn that
+        # resolves the vertical, the use case and the technology and then offers
+        # nothing reads as a refusal for no stated reason, and the person has
+        # nowhere to click. So the server composes one from what it has.
+        if not briefs and all(understood.get(k) for k in ("vertical", "use_case", "technology")):
+            briefs = self._check_briefs(synth, [self._compose_brief(understood, transcript)])
         # THE CORPUS DECIDES, IN BOTH DIRECTIONS. The model's flag is a
         # proposal and nothing more.
         #
@@ -402,9 +410,55 @@ class ScopingService:
                 # A brief that is malformed or outside the vocabulary cannot be
                 # run by either route, which is why this is not just `not
                 # runnable`.
-                "hypothesis": bool(hypothesis and triple),
+                # Open whenever the triple is legal, NOT only when the corpus
+                # came up short. A brief the corpus does carry can still lose its
+                # candidate at the critic — that is the commonest outcome in the
+                # run log — and a person left with a finished run, nothing
+                # created and no second route has been refused twice.
+                "hypothesis": bool(triple),
             })
         return checked
+
+    def _compose_brief(self, understood: dict[str, Any],
+                       transcript: list[dict[str, str]]) -> dict[str, Any]:
+        """Build a brief from what the conversation settled, without the model.
+
+        A fallback, not a preference: the model writes a better sentence than
+        this, because it can weigh which of six turns mattered. What this
+        guarantees is that a settled conversation is never a dead end — the axes
+        are known, so a brief exists, so there is a route.
+
+        The description is the person's own words, most recent first because the
+        later turns are the ones that sharpened it, trimmed to the length the
+        retrieval wants. The labels come from `understood`, which the server has
+        already resolved against the closed vocabularies, so the triple is legal
+        by construction.
+        """
+        said = [" ".join(m["content"].split()) for m in transcript if m["role"] == "user"]
+        # Chronological, because that is how it was told and how it reads. An
+        # earlier version put the most recent turn first, on the theory that the
+        # later answers are the specific ones. They are — but they are also one
+        # or two words each ("both", "managed service"), so leading with them
+        # produced "both IT and operations sign municipalities buy it place large
+        # TV screens...", which is not a sentence and retrieves like nothing.
+        description = " ".join(said)
+        if understood.get("buyer_problem"):
+            description = f"{description} The problem: {understood['buyer_problem']}."
+        description = " ".join(description.split())[:MAX_BRIEF_CHARS].rstrip()
+        # The longest thing they said, not the last: the opening statement is
+        # almost always the idea, and the closing turns are answers to questions.
+        longest = max(said, key=len) if said else "Untitled space"
+        return {
+            "title": longest[:80].rstrip(),
+            "description": description,
+            "vertical": understood["vertical"],
+            "use_case": understood["use_case"],
+            "technology": understood["technology"],
+            "geographies": understood.get("geographies") or [],
+            "rationale": "Composed from the conversation — the assistant settled the taxonomy "
+                         "but did not write a brief, so this is what it had.",
+            "hypothesis_rationale": description,
+        }
 
     def _support(self, triple: tuple[str, str, str] | None, description: str,
                  signals: list[dict[str, Any]]) -> tuple[list[str | None], str]:

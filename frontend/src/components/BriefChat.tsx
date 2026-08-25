@@ -65,9 +65,12 @@ interface Props {
  * space gets built and scores low, which is the honest reading of a hypothesis
  * rather than a shortcoming to hide.
  */
-function HypothesisForm({ brief, disabled, onSubmit }: {
+function HypothesisForm({ brief, disabled, evidenced, onSubmit }: {
   brief: ScopingBrief
   disabled: boolean
+  /** The corpus does carry this brief, so Generate above will run. This route
+   *  is then the fallback rather than the only way through. */
+  evidenced: boolean
   onSubmit: (body: HypothesisRequest) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -78,11 +81,24 @@ function HypothesisForm({ brief, disabled, onSubmit }: {
 
   if (!open) {
     return (
-      <div className="chat-hyp">
+      <div className={`chat-hyp${evidenced ? ' is-fallback' : ''}`}>
         <p>
-          <b>The corpus is silent about this — that is not the same as the idea being wrong.</b>{' '}
-          Nobody has published about it yet, which is what makes it new. You can still build the
-          space, on what <i>you</i> know rather than on evidence that is not about it.
+          {evidenced ? (
+            <>
+              <b>Or build it on what you know instead.</b> The corpus carries this well enough to
+              run, but a run can still end with nothing: the candidate has to survive a critic that
+              rejects claims citing evidence which is near the subject rather than about it. If
+              that happens, or if you would rather the space rested on your own account, take this
+              route.
+            </>
+          ) : (
+            <>
+              <b>The corpus is silent about this — that is not the same as the idea being
+              wrong.</b>{' '}
+              Nobody has published about it yet, which is what makes it new. You can still build
+              the space, on what <i>you</i> know rather than on evidence that is not about it.
+            </>
+          )}
           {brief.hypothesis_rationale
             && ' What you have said so far is already written up below — check it and go.'}
         </p>
@@ -265,10 +281,14 @@ function BriefCard({ brief, index, text, selected, onText, onToggle, onOpenTopic
         </ul>
       )}
 
-      {/* Where the evidence-backed route closes and the contributed one opens. */}
-      {!brief.runnable && brief.hypothesis && (
+      {/* Offered whether or not the evidence-backed route is open. A runnable
+          brief is not a guaranteed space: the run log's commonest ending is a
+          candidate the critic threw out for citing evidence that was retrieved
+          but not really about it. Someone who has just watched a finished run
+          create nothing needs the second route to still be here. */}
+      {brief.hypothesis && (
         <HypothesisForm brief={{ ...brief, description: text }} disabled={busy}
-                        onSubmit={onHypothesis} />
+                        evidenced={brief.runnable} onSubmit={onHypothesis} />
       )}
 
       {brief.evidence.count > 0 && (

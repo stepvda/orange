@@ -1536,6 +1536,9 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
   margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
   border: 1px solid var(--status-warn); background: var(--surface-0);
 }
+/* When the evidence route is open too, this is the alternative rather than the
+   only way through — quieter, so it does not read as a warning. */
+.chat-hyp.is-fallback { border-color: var(--border); }
 .chat-hyp p { font-size: 11.5px; line-height: 1.55; color: var(--text-secondary); margin: 0 0 8px; }
 .chat-hyp h5 { font-size: 12.5px; margin: 0 0 6px; }
 .chat-hyp button { font-size: 11.5px; padding: 5px 11px; }
