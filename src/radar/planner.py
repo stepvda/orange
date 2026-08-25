@@ -93,12 +93,16 @@ class PlanInputs:
     horizon_tolerance: float | None = None
     max_competition: str | None = None        # none | low | medium | high
     require_sovereign: bool = False
+    #: FR-25 stage gate (§4.10) — restrict candidates to spaces already at one of
+    #: these workflow stages. Empty means unfiltered: a plan is a discovery tool
+    #: as much as a go-to-market one, and most spaces have no workflow state yet.
+    workflow_stages: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "PlanInputs":
         data = dict(data or {})
         for key in ("geographies", "exclude_verticals", "exclude_technologies",
-                    "prefer_verticals", "prefer_domains"):
+                    "prefer_verticals", "prefer_domains", "workflow_stages"):
             if key in data and data[key] is not None:
                 data[key] = tuple(data[key])
         known = {f for f in cls.__dataclass_fields__}
@@ -183,6 +187,11 @@ class Planner:
 
     # ------------------------------------------------------------------ run
     def plan(self, inputs: PlanInputs) -> dict[str, Any]:
+        if inputs.workflow_stages:
+            from .workflow import STAGES
+            unknown = set(inputs.workflow_stages) - set(STAGES)
+            if unknown:
+                raise ValueError(f"Unknown workflow stage(s) {sorted(unknown)}. Known: {STAGES}")
         candidates = self.candidates(inputs)
         if not candidates:
             raise ValueError(
@@ -226,12 +235,14 @@ class Planner:
                                               WHEN 'L2' THEN 2 WHEN 'L3' THEN 3
                                               WHEN 'L4' THEN 4 END)
                              FROM opportunity_links l
-                             WHERE l.opportunity_id=o.id AND l.rejected=0), 4) dist
+                             WHERE l.opportunity_id=o.id AND l.rejected=0), 4) dist,
+                   w.stage workflow_stage
             FROM opportunity_spaces o
             JOIN market_sizes m ON m.opportunity_id = o.id
                 AND m.method = 'bottom_up_adoption'
                 AND m.computed_at = (SELECT MAX(computed_at) FROM market_sizes x
                                      WHERE x.opportunity_id=o.id AND x.method='bottom_up_adoption')
+            LEFT JOIN workflow_state w ON w.opportunity_id = o.id
             WHERE o.merged_into IS NULL
               AND o.state IN ('active','watchlist','fading')
               AND m.som_base IS NOT NULL AND m.som_base > 0
@@ -240,6 +251,8 @@ class Planner:
         out: list[Candidate] = []
         for r in rows:
             if CONFIDENCE_RANK.get(r["confidence"], 2) > conf_floor:
+                continue
+            if inputs.workflow_stages and r["workflow_stage"] not in inputs.workflow_stages:
                 continue
             if r["dist"] > inputs.max_portfolio_distance:
                 continue

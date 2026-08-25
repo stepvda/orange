@@ -703,6 +703,8 @@ class PlanIn(BaseModel):
     max_share_per_vertical: float | None = None
     max_share_per_technology: float | None = None
     max_competition: str | None = None
+    #: FR-25 stage gate (§4.10) — empty means every workflow stage is eligible.
+    workflow_stages: list[str] = []
 
 
 @app.get("/api/planner/meta")
@@ -714,6 +716,7 @@ def planner_meta() -> dict[str, Any]:
     with the engine would be worse than no form.
     """
     econ = _cfg.economics or {}
+    from .workflow import STAGES, STAGE_LABELS
     plannable = _db.query_one("""
         SELECT COUNT(DISTINCT o.id) n FROM opportunity_spaces o
         JOIN market_sizes m ON m.opportunity_id=o.id AND m.method='bottom_up_adoption'
@@ -743,6 +746,7 @@ def planner_meta() -> dict[str, Any]:
         "sizes_by_confidence": by_conf,
         "verticals": [{"id": v.id, "label": v.label} for v in _cfg.verticals],
         "domains": [{"id": d.id, "label": d.label} for d in _cfg.domains],
+        "workflow_stages": [{"id": s, "label": STAGE_LABELS[s]} for s in STAGES],
     }
 
 
