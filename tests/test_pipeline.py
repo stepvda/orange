@@ -215,3 +215,86 @@ def test_extracts_are_truncated_so_no_source_is_mirrored(cfg):
     connector = RssSearchConnector({"id": "x", "params": {}}, HttpSession("test"), max_extract_chars=200)
     clipped = connector.clip("word " * 500)
     assert len(clipped) <= 210
+
+
+# ---------------------------------------------------------------------------
+# DR-03 — stable identifiers across refreshes
+# ---------------------------------------------------------------------------
+
+def test_space_ids_keep_counting_past_the_thousandth(db):
+    """`OS999` sorts above `OS1000` as TEXT, and `id` is a TEXT primary key.
+
+    Minting the next id from `ORDER BY id DESC` therefore stopped advancing at
+    the thousandth space: it read 'OS999' back for ever, handed out 'OS1000'
+    twice, and the second INSERT failed the primary-key constraint — which, in
+    `_persist`, rolls back every candidate in the batch rather than one.
+    """
+    conn = db.connect()
+    try:
+        cur = conn.cursor()
+        assert Synthesiser._next_id(cur) == "OS001", "an empty radar starts at OS001"
+        for n in range(1, 1000):
+            cur.execute(
+                "INSERT INTO opportunity_spaces (id, vertical, use_case, technology, statement, "
+                "state, first_seen, last_refresh, pipeline_version) "
+                "VALUES (?,?,?,?,?,'candidate','2026-01-01','2026-01-01','t')",
+                (f"OS{n:03d}", "manufacturing", f"uc{n}", f"tech{n}", "s"),
+            )
+        minted = Synthesiser._next_id(cur)
+        assert minted == "OS1000"
+        cur.execute(
+            "INSERT INTO opportunity_spaces (id, vertical, use_case, technology, statement, "
+            "state, first_seen, last_refresh, pipeline_version) "
+            "VALUES (?,?,?,?,?,'candidate','2026-01-01','2026-01-01','t')",
+            (minted, "manufacturing", "uc1000", "tech1000", "s"),
+        )
+        assert Synthesiser._next_id(cur) == "OS1001", "the next id must not collide with OS1000"
+    finally:
+        conn.close()
+
+
+def test_a_hand_written_id_does_not_derail_the_sequence(db):
+    """`CAST(SUBSTR(id, 3) AS INTEGER)` reads 'OS-manual' as 0, so the GLOB that
+    keeps it out of the max is load-bearing rather than decoration."""
+    conn = db.connect()
+    try:
+        cur = conn.cursor()
+        for space_id in ("OS007", "OS-manual"):
+            cur.execute(
+                "INSERT INTO opportunity_spaces (id, vertical, use_case, technology, statement, "
+                "state, first_seen, last_refresh, pipeline_version) "
+                "VALUES (?,?,?,?,?,'candidate','2026-01-01','2026-01-01','t')",
+                (space_id, "manufacturing", f"uc-{space_id}", f"tech-{space_id}", "s"),
+            )
+        assert Synthesiser._next_id(cur) == "OS008"
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# LK-07 — asset withdrawal
+# ---------------------------------------------------------------------------
+
+def test_a_withdrawn_asset_is_retired_once_however_often_the_graph_is_rebuilt(cfg, db):
+    """`node_type || '_retired'` is not idempotent.
+
+    An asset that stays out of the config was re-suffixed on every rebuild —
+    'offer_retired_retired_retired' — which nothing downstream matches on, and
+    it was re-counted as a fresh withdrawal each time, so the build stats
+    reported the same removal for ever.
+    """
+    build_graph(cfg, db)
+    with db.cursor() as cur:
+        cur.execute("INSERT INTO graph_nodes (id, node_type, label, attributes, source, as_of) "
+                    "VALUES ('offer:withdrawn','offer','Withdrawn','{}','test','2026-01-01')")
+
+    first = build_graph(cfg, db)
+    assert first["retired_nodes"] == 1
+    assert db.query_one("SELECT node_type FROM graph_nodes WHERE id='offer:withdrawn'"
+                        )["node_type"] == "offer_retired"
+
+    for _ in range(3):
+        again = build_graph(cfg, db)
+        assert again["retired_nodes"] == 0, "an already-retired node is not a new withdrawal"
+    assert db.query_one("SELECT node_type FROM graph_nodes WHERE id='offer:withdrawn'"
+                        )["node_type"] == "offer_retired", "the suffix must not accumulate"

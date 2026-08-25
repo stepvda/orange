@@ -774,8 +774,6 @@ def analytics_grid() -> dict[str, Any]:
     document: where topics exist, and where Orange has proof points to sell them.
     """
     topics = _read.topics(states=("active", "watchlist", "fading", "candidate"))
-    verticals = [v.id for v in _cfg.verticals]
-    domains = [d.id for d in _cfg.domains]
     cells: dict[str, dict[str, Any]] = {}
     for topic in topics:
         for domain in topic["domains"]:

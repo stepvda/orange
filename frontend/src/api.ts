@@ -343,7 +343,13 @@ export const api = {
 
   cancelGeneration: (id: string) => post<GenerationJob>(`/generate/${id}/cancel`),
 
-  /** FR-23 / FR-34 / DR-15 — exposure context travels with every event. */
+  /** FR-23 / FR-34 / DR-15 — exposure context travels with every event.
+   *
+   *  Through `post` like everything else. It used to call `fetch` directly and
+   *  `.then((r) => r.json())`, which RESOLVES on a 401 or a 500 — the response
+   *  body parses fine, it just is not a receipt. The caller's optimistic tick
+   *  therefore stayed on screen for feedback the server had refused, and an
+   *  expired session here never reached `setSessionEndedHandler`. */
   feedback: (payload: {
     role: string
     kind: 'rating' | 'comparison' | 'override' | 'engagement'
@@ -352,10 +358,5 @@ export const api = {
     verdict?: string
     reason?: string
     exposure_context?: Record<string, unknown>
-  }) =>
-    fetch(`${BASE}/feedback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).then((r) => r.json()),
+  }) => post<{ stored: boolean; at: string }>('/feedback', payload),
 }
