@@ -3,11 +3,12 @@
 MVP implementation of the requirements baseline in
 [`docs/Orange_Innovation_Radar_Requirements_and_Approach.docx`](docs/).
 
-**Documentation:** [`docs/`](docs/README.md) — the Functional Design Document and
+**Documentation:** [documentation index](docs/DOCUMENTATION.md) — the Functional Design Document and
 Technical Architecture as Word documents, plus the
 [API](docs/API.md), [data model](docs/DATA_MODEL.md),
 [runbook](docs/OPERATIONS.md), [decisions](docs/DECISIONS.md),
 [market sizing](docs/MARKET_SIZING.md),
+[scoring formulas](docs/SCORING_FORMULAS.md),
 [competitor intelligence](docs/COMPETITOR_INTELLIGENCE.md) and
 [changelog](docs/CHANGELOG.md) references.
 
@@ -73,7 +74,7 @@ The five features that carry it:
    own rejection rate.** Four defences in the requirements' order of
    effectiveness — evidence binding, closed vocabulary, no model-generated
    numbers, entailment — plus an adversarial critic with a different system
-   prompt that scores as the *minimum* across five tests. An uncited claim is
+   prompt that scores as the _minimum_ across five tests. An uncited claim is
    **stripped, not rewritten**. In the live run, 254 candidates produced 60
    accepted spaces: 6 failed vocabulary, 7 failed evidence binding, 119 failed
    the critic, 62 merged as duplicates, and 15 individual claims were stripped by
@@ -95,7 +96,7 @@ The five features that carry it:
    release.** Two independent methods side by side — enterprises × adoption ×
    engagement value from Eurostat, and annualised contracts that actually exist
    from TED — with every factor carrying its dataset, year and basis. SAM is
-   *computed* rather than discounted by a fudge factor. The confidence grade is
+   _computed_ rather than discounted by a fudge factor. The confidence grade is
    the **worst** basis among the factors, never an average, and where nothing
    attributable exists no number is published: 531 of 752 computations are graded
    `observed`, 145 `partial`, 76 `modelled`.
@@ -108,14 +109,14 @@ The five features that carry it:
    paragraph, a **differentiation** paragraph and a **concession** — what the
    competitor genuinely does better, because a paragraph that gives them nothing
    reads as marketing. The differentiation paragraph may only name Orange assets
-   linked to *that* space in the business graph; where nothing is linked it says
+   linked to _that_ space in the business graph; where nothing is linked it says
    Orange would be competing on price and delivery. An invented advantage is not
    caught in review, it is caught in the meeting.
    → [Competitor intelligence](#competitor-intelligence--what-they-say-they-sell-433-extension)
 
 5. **It ends in a deliverable, and then in a portfolio.** Each space produces a
    six-page PDF brief whose solution diagram is drawn by a renderer from a
-   model-emitted *structure* rather than by the model itself, plus twelve
+   model-emitted _structure_ rather than by the model itself, plus twelve
    pre-sales artefacts — qualification, solution outline, battlecards, business
    case, PoC scope, tender blocks, risk register and more — documents as PDF,
    Word or OpenDocument and decks as PowerPoint, OpenDocument or PDF. Above them
@@ -133,7 +134,7 @@ they are to fix. All three are surfaced in the interface rather than left to be
 discovered.
 
 **1. Not one of the 5,217 links has been confirmed by a human.** LK-06 asks for a
-named curator to adjudicate the *first occurrence of each link pattern*, and the
+named curator to adjudicate the _first occurrence of each link pattern_, and the
 count of confirmed links is currently zero. Right to win is a structured lookup
 over exactly those links, so every right-to-win score in the radar rests on
 machine-proposed evidence nobody has signed. The same gap runs wider than links:
@@ -151,7 +152,7 @@ needs is built and works (`radar replay --date 2024-06-01`, publication-date
 leakage control, retained raw archives), but the §4.7.5 evaluation metrics are
 not implemented, so the radar cannot yet answer the question that would justify
 it: did a space scoring 80 in June behave differently by December from one
-scoring 40? Until it can, the scores are a defensible, transparent, *asserted*
+scoring 40? Until it can, the scores are a defensible, transparent, _asserted_
 ordering. The next step is small and specific — run the replay at three past
 dates, and measure rank stability and precision against what has since been
 tendered.
@@ -169,8 +170,8 @@ shape of problem from the other end: 446 of 449 spaces sit in Shortlisted, so a
 workflow-sourced plan currently describes a portfolio of three.
 
 Three more are named in full rather than implied, because they bear on anyone
-deploying this: there is **no per-role authorisation** (sign-in answers *who*,
-not *may they* — every signed-in account can move a stage, delete a space and
+deploying this: there is **no per-role authorisation** (sign-in answers _who_,
+not _may they_ — every signed-in account can move a stage, delete a space and
 spend model budget), **no rate limiting** on the endpoints that spend that
 budget, and **no ROI on a plan**, because no cost data exists at the granularity
 a space would need and inventing the denominator would be worse than omitting the
@@ -189,35 +190,35 @@ asked to count will occasionally be wrong and always be unverifiable."
 produced it (DR-10), and every generative system prompt has the no-numbers rule
 appended in the client itself rather than left to the prompt author.
 
-| Stage | What the model does | Why a model rather than rules | What stops it being wrong |
-|---|---|---|---|
-| `classify` (`pipeline/ingest.py`) | Assigns one of six signal types to each item, batched, cheap model | 11,498 items across six languages. A keyword rule cannot tell a regulatory consultation from a funding award from a deployment announcement — the distinction is in what the document *does*, not which words it contains | Closed six-value list, per-item confidence stored, heuristic fallback if the batch fails |
-| `synthesise` (`pipeline/synthesis.py`) | Reads a theme cluster and proposes a vertical × use case × technology with a written statement and cited claims. Three passes per cluster at temperature 0.85, each under a different **evidence lens** — regulatory, procurement, technology-maturity, cross-vertical | This is the irreducible step. The whole point of a radar is the cell that is not in anybody's catalogue yet; no rule proposes what nobody has written down. The lenses exist because an open-ended loop "elaborates around whatever it produced first" | All four §4.4.4 defences plus the critic. 194 of 254 candidates did not survive |
-| `critique` (same) | A separate system prompt scores a candidate 1–5 as the **minimum** across five tests | Judging whether a proposal is specific, evidenced and non-obvious is a reading task | Minimum rather than mean, so one failure caps the score. Rejections carry written reasons |
-| `entailment` (same) | Cheap second pass: is this claim entailed by the span it cites? | Citation formatting is checkable by code; *entailment* is not | Temperature 0, and a failed call keeps the claim rather than deleting evidence |
-| `strategic_relevance` (`scoring.py`) | Scores a space against the *Trust the future* ambitions on a 0–5 rubric with worked anchors | Judging a topic against a written strategy document is comprehension, not lookup | Discrete levels mapped to fixed numbers, deterministic priors computed first, and a deterministic fallback if no model is available. This is 15% of one of two scores |
-| `describe` (`pipeline/describe.py`) | Writes the long-form description from the space's own evidence, linked assets and named competitors | Turning structured evidence into something a human reads is what language models are for | Evidence binding, closed vocabulary on the diagram, no-numbers regex, named-entity check. Stripped sections are listed in the UI |
-| `competitor-profile` / `competitor-analysis` | One call per competitor turns crawled pages into a structured profile; one call per space writes activity, differentiation and concession | Reading 1,745 marketing pages and extracting what each firm claims to sell | Tags need word-boundary corroboration in the source text; named offers must be supported by the cited page; differentiation may only name linked Orange assets |
-| `actions` (`pipeline/actions.py`) | The next action per role | A next step is a sentence, not a field | Role-scoped, bound to the space's own links |
-| `plan` narrative (`planner.py`) | One call writes the business plan over the already-computed plan | The plan is a table; the argument is prose | **A section that introduces a number is stripped and listed.** The table is authoritative |
-| `presales/content.py` | Fills the twelve collateral pieces | Same reason as `describe`, twelve times | One snapshot per pack, so pieces cannot disagree; a piece with a missing input still builds and says so |
-| `scoping.py` / `scouting.py` | The Generate screen's interview, and turning a brief into search queries | Somebody who knows their market but not this taxonomy under-specifies two of five fields every time | The Generate button is enabled by the **corpus**, not by the assistant's opinion of itself; where the two disagree the screen says so |
+| Stage                                        | What the model does                                                                                                                                                                                                                                                    | Why a model rather than rules                                                                                                                                                                                                                          | What stops it being wrong                                                                                                                                             |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `classify` (`pipeline/ingest.py`)            | Assigns one of six signal types to each item, batched, cheap model                                                                                                                                                                                                     | 11,498 items across six languages. A keyword rule cannot tell a regulatory consultation from a funding award from a deployment announcement — the distinction is in what the document _does_, not which words it contains                              | Closed six-value list, per-item confidence stored, heuristic fallback if the batch fails                                                                              |
+| `synthesise` (`pipeline/synthesis.py`)       | Reads a theme cluster and proposes a vertical × use case × technology with a written statement and cited claims. Three passes per cluster at temperature 0.85, each under a different **evidence lens** — regulatory, procurement, technology-maturity, cross-vertical | This is the irreducible step. The whole point of a radar is the cell that is not in anybody's catalogue yet; no rule proposes what nobody has written down. The lenses exist because an open-ended loop "elaborates around whatever it produced first" | All four §4.4.4 defences plus the critic. 194 of 254 candidates did not survive                                                                                       |
+| `critique` (same)                            | A separate system prompt scores a candidate 1–5 as the **minimum** across five tests                                                                                                                                                                                   | Judging whether a proposal is specific, evidenced and non-obvious is a reading task                                                                                                                                                                    | Minimum rather than mean, so one failure caps the score. Rejections carry written reasons                                                                             |
+| `entailment` (same)                          | Cheap second pass: is this claim entailed by the span it cites?                                                                                                                                                                                                        | Citation formatting is checkable by code; _entailment_ is not                                                                                                                                                                                          | Temperature 0, and a failed call keeps the claim rather than deleting evidence                                                                                        |
+| `strategic_relevance` (`scoring.py`)         | Scores a space against the _Trust the future_ ambitions on a 0–5 rubric with worked anchors                                                                                                                                                                            | Judging a topic against a written strategy document is comprehension, not lookup                                                                                                                                                                       | Discrete levels mapped to fixed numbers, deterministic priors computed first, and a deterministic fallback if no model is available. This is 15% of one of two scores |
+| `describe` (`pipeline/describe.py`)          | Writes the long-form description from the space's own evidence, linked assets and named competitors                                                                                                                                                                    | Turning structured evidence into something a human reads is what language models are for                                                                                                                                                               | Evidence binding, closed vocabulary on the diagram, no-numbers regex, named-entity check. Stripped sections are listed in the UI                                      |
+| `competitor-profile` / `competitor-analysis` | One call per competitor turns crawled pages into a structured profile; one call per space writes activity, differentiation and concession                                                                                                                              | Reading 1,745 marketing pages and extracting what each firm claims to sell                                                                                                                                                                             | Tags need word-boundary corroboration in the source text; named offers must be supported by the cited page; differentiation may only name linked Orange assets        |
+| `actions` (`pipeline/actions.py`)            | The next action per role                                                                                                                                                                                                                                               | A next step is a sentence, not a field                                                                                                                                                                                                                 | Role-scoped, bound to the space's own links                                                                                                                           |
+| `plan` narrative (`planner.py`)              | One call writes the business plan over the already-computed plan                                                                                                                                                                                                       | The plan is a table; the argument is prose                                                                                                                                                                                                             | **A section that introduces a number is stripped and listed.** The table is authoritative                                                                             |
+| `presales/content.py`                        | Fills the twelve collateral pieces                                                                                                                                                                                                                                     | Same reason as `describe`, twelve times                                                                                                                                                                                                                | One snapshot per pack, so pieces cannot disagree; a piece with a missing input still builds and says so                                                               |
+| `scoping.py` / `scouting.py`                 | The Generate screen's interview, and turning a brief into search queries                                                                                                                                                                                               | Somebody who knows their market but not this taxonomy under-specifies two of five fields every time                                                                                                                                                    | The Generate button is enabled by the **corpus**, not by the assistant's opinion of itself; where the two disagree the screen says so                                 |
 
 **Where a model is deliberately not used.** This list is the more load-bearing
 half, because it is what makes the first list cheap enough to verify.
 
-| Task | What does it instead | Why not a model |
-|---|---|---|
-| Signal counting, publisher diversity, recency, momentum | Arithmetic — log compression, Shannon entropy, least-squares slope | Unverifiable and occasionally wrong, for a task where a `for` loop is exact |
-| Relevance gating | Vocabulary keyword match over the taxonomy | 11,498 items × a model call is a cost with no accuracy gain over a controlled vocabulary |
-| Theme clustering | Local embeddings + agglomerative clustering at a distance threshold | SC-11 requires identical inputs to give identical output. Generation here "would invent structure" |
-| Right to win | Structured lookup against the business graph (SC-15) | Asking a model whether Orange can win is asking it to assert a fact about a company. Seven components, all from config with named owners |
-| Market size | Arithmetic over Eurostat observations and TED notices | The whole point of §4.3.4 is that quoted figures conflict by an order of magnitude |
-| Competitive intensity level | Weighted count over the listed competitors, banded | A level with no names is an opinion |
-| Evidence enrichment | Embedding similarity **plus** independent taxonomy corroboration | Similarity alone happily rates two unrelated security items as close, and unchecked attachment inflates exactly the components that count signals |
-| Portfolio selection | Mixed-integer program (scipy `milp`, HiGHS) | Selection under capacity and concentration constraints has an optimum; a model would approximate it and could not say which constraint bound |
-| The solution diagram | The model emits a *structure*; reportlab draws it | A model asked for SVG produces something plausible that overlaps its own labels |
-| Duplicate identity | The canonical taxonomy triple, plus an embedding threshold | Identity must be stable across refreshes or momentum is unmeasurable |
+| Task                                                    | What does it instead                                                | Why not a model                                                                                                                                   |
+| ------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signal counting, publisher diversity, recency, momentum | Arithmetic — log compression, Shannon entropy, least-squares slope  | Unverifiable and occasionally wrong, for a task where a `for` loop is exact                                                                       |
+| Relevance gating                                        | Vocabulary keyword match over the taxonomy                          | 11,498 items × a model call is a cost with no accuracy gain over a controlled vocabulary                                                          |
+| Theme clustering                                        | Local embeddings + agglomerative clustering at a distance threshold | SC-11 requires identical inputs to give identical output. Generation here "would invent structure"                                                |
+| Right to win                                            | Structured lookup against the business graph (SC-15)                | Asking a model whether Orange can win is asking it to assert a fact about a company. Seven components, all from config with named owners          |
+| Market size                                             | Arithmetic over Eurostat observations and TED notices               | The whole point of §4.3.4 is that quoted figures conflict by an order of magnitude                                                                |
+| Competitive intensity level                             | Weighted count over the listed competitors, banded                  | A level with no names is an opinion                                                                                                               |
+| Evidence enrichment                                     | Embedding similarity **plus** independent taxonomy corroboration    | Similarity alone happily rates two unrelated security items as close, and unchecked attachment inflates exactly the components that count signals |
+| Portfolio selection                                     | Mixed-integer program (scipy `milp`, HiGHS)                         | Selection under capacity and concentration constraints has an optimum; a model would approximate it and could not say which constraint bound      |
+| The solution diagram                                    | The model emits a _structure_; reportlab draws it                   | A model asked for SVG produces something plausible that overlaps its own labels                                                                   |
+| Duplicate identity                                      | The canonical taxonomy triple, plus an embedding threshold          | Identity must be stable across refreshes or momentum is unmeasurable                                                                              |
 
 **Why the AI parts are better than not having them.** Three things this pipeline
 does that a rules-only version could not do at any reasonable cost. It **reads**
@@ -230,7 +231,7 @@ ideas" into "cover the evidenced grid", which terminates and is measurable. And
 it **writes** — a description, a battlecard and a business plan are prose, and
 the alternative to generating them is not a template, it is nobody writing them.
 
-The honest limit, stated the same way: everything above is a *drafting* function
+The honest limit, stated the same way: everything above is a _drafting_ function
 with a human gate downstream, and nothing above is trusted to state a fact. That
 is why the model never produces a number, never asserts an Orange capability, and
 never survives its own first pass without a critic.
@@ -242,7 +243,7 @@ of things you should **not** trust, which is the part that makes the rest
 credible.
 
 **1. Every claim resolves to a document.** A claim carries signal ids, validated
-to exist *in the cluster that produced the candidate*; each signal carries its
+to exist _in the cluster that produced the candidate_; each signal carries its
 publisher, publication date, tier and URL. In the interface the citation is
 clickable — you can read the source that produced the sentence. A claim that
 cannot cite is **stripped, not rewritten**, and what was stripped is listed
@@ -256,7 +257,7 @@ published figure is arithmetic over named inputs, and every input names its
 dataset, year and basis.
 
 **3. Every number is reproducible from stored inputs.** DR-05 stores each score
-component *with the inputs that produced it*; DR-10 stamps every artefact with
+component _with the inputs that produced it_; DR-10 stamps every artefact with
 its pipeline, prompt and model version. NFR-03 asks that "a reviewer outside the
 project can reconstruct why any topic holds its rank", so the **How was this
 calculated?** modal shows the weight table, the weighted total, and per component
@@ -289,7 +290,7 @@ control on publication date. The bugs they caught are named in the
 silently wrong rather than broken: Shannon entropy is scale-invariant, so a
 uniform tier-4 discount cancelled out entirely and six vendor blogs scored
 identically to six independent outlets; and the competitor profiler, asked for
-OVHcloud's technologies, returned the *first eight ids in vocabulary order* —
+OVHcloud's technologies, returned the _first eight ids in vocabulary order_ —
 every id valid, so closed-vocabulary validation passed all eight, and OVHcloud's
 pages mention 5G zero times. Both are now regression tests.
 
@@ -304,20 +305,20 @@ each. Nine catalogued sources are unwired and say why.
 **What you should not trust, and why it is listed here.** Every one of these is
 labelled in the interface as well, but a reader deserves them in one place:
 
-* **SOM is a modelled number.** TAM and SAM are computed; the obtainable share is
+- **SOM is a modelled number.** TAM and SAM are computed; the obtainable share is
   an assumption anchored on right-to-win and portfolio distance, and it is
   labelled as such everywhere it appears.
-* **The four-year contract duration is an assumption with an owner.** TED
+- **The four-year contract duration is an assumption with an owner.** TED
   publishes a contract's whole value and annualising it needs a duration. Every
   market size in the radar moves inversely with that figure.
-* **The size-class weights are an assumption with an owner**, printed in the
+- **The size-class weights are an assumption with an owner**, printed in the
   brief rather than buried.
-* **The scoring weights are uncalibrated** — see limitation 2 above.
-* **No link has a human's name on it** — see limitation 1 above.
-* **Contract values are a public-procurement proxy for private-sector deals**,
+- **The scoring weights are uncalibrated** — see limitation 2 above.
+- **No link has a human's name on it** — see limitation 1 above.
+- **Contract values are a public-procurement proxy for private-sector deals**,
   used because it is the only attributable source available.
-* **A competitor's own website is tier 4** — an interested party, exactly like a
-  vendor press release. A profile may *explain* a competitor and *seed*
+- **A competitor's own website is tier 4** — an interested party, exactly like a
+  vendor press release. A profile may _explain_ a competitor and _seed_
   generation; it may not lift attractiveness or any other published score.
 
 ### 5. How the scoring works, and why this approach
@@ -334,26 +335,26 @@ intensity sit beside them as a third and fourth quantity, equally uncombined.
 
 **Attractiveness — five components, four of them arithmetic.**
 
-| Component | Weight | How it is computed | The failure it is designed against |
-|---|---|---|---|
-| Market signal strength | 0.30 | `100 × log₂(1+n) / log₂(1+corpus_max)` over relevance-gated signals | Log compression stops one noisy topic saturating the scale. Normalising against the live corpus makes the score mean "how visible is this relative to everything else on the radar", not "how many articles exist" |
-| Source diversity | 0.20 | Shannon entropy over the publisher distribution, syndicated duplicates collapsed on (publisher, title prefix), tier-4 publishers discounted to 0.35 | "Twenty outlets all syndicating one vendor press release is one source, not twenty." The discount is applied to the **effective publisher count**, not to summed weights — applied naively, entropy's scale-invariance cancels it out entirely |
-| Evidence quality | 0.20 | Tier-weighted mean (1.00 / 0.75 / 0.45 / 0.15). Tier-4 **share** above a 0.25 cap cuts the mean in proportion to the excess, and a further 45% cut applies when there is no tier-1 or tier-2 evidence at all | A cap on the *share*, not a discount on each item, so no volume of vendor material reaches a high score (SC-09) |
-| Novelty and momentum | 0.15 | Least-squares slope over six trailing 15-day buckets, scaled by the mean level, plus a first-appearance bonus and a long-flat-history penalty | Scaling by mean level stops 0→1→2 being read like 0→10→20. The flat penalty is what demotes a topic that has been quietly present for a year |
-| Strategic relevance | 0.15 | Deterministic priors (privileged vertical, sovereign deliverability) plus a 0–5 rubric level mapped to {0, 20, 40, 60, 80, 100} | Discrete anchored levels rather than a free 0–100 ask, because §4.6 warns free numeric asks compress toward the middle. Falls back to deterministic marker matching with no model |
+| Component              | Weight | How it is computed                                                                                                                                                                                           | The failure it is designed against                                                                                                                                                                                                             |
+| ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Market signal strength | 0.30   | `100 × log₂(1+n) / log₂(1+corpus_max)` over relevance-gated signals                                                                                                                                          | Log compression stops one noisy topic saturating the scale. Normalising against the live corpus makes the score mean "how visible is this relative to everything else on the radar", not "how many articles exist"                             |
+| Source diversity       | 0.20   | Shannon entropy over the publisher distribution, syndicated duplicates collapsed on (publisher, title prefix), tier-4 publishers discounted to 0.35                                                          | "Twenty outlets all syndicating one vendor press release is one source, not twenty." The discount is applied to the **effective publisher count**, not to summed weights — applied naively, entropy's scale-invariance cancels it out entirely |
+| Evidence quality       | 0.20   | Tier-weighted mean (1.00 / 0.75 / 0.45 / 0.15). Tier-4 **share** above a 0.25 cap cuts the mean in proportion to the excess, and a further 45% cut applies when there is no tier-1 or tier-2 evidence at all | A cap on the _share_, not a discount on each item, so no volume of vendor material reaches a high score (SC-09)                                                                                                                                |
+| Novelty and momentum   | 0.15   | Least-squares slope over six trailing 15-day buckets, scaled by the mean level, plus a first-appearance bonus and a long-flat-history penalty                                                                | Scaling by mean level stops 0→1→2 being read like 0→10→20. The flat penalty is what demotes a topic that has been quietly present for a year                                                                                                   |
+| Strategic relevance    | 0.15   | Deterministic priors (privileged vertical, sovereign deliverability) plus a 0–5 rubric level mapped to {0, 20, 40, 60, 80, 100}                                                                              | Discrete anchored levels rather than a free 0–100 ask, because §4.6 warns free numeric asks compress toward the middle. Falls back to deterministic marker matching with no model                                                              |
 
 **Right to win — seven components, all structured lookup, none asserted by a
 model** (SC-15).
 
-| Component | Weight | Source |
-|---|---|---|
-| Offer match | 0.25 | 100 for a direct (L0) offer link, 55 for a bundle (L1), 0 otherwise — `config/business_graph/offers.yaml` |
-| Reference density | 0.20 | Published customer stories apportioned onto the 15 verticals, normalised to the peak vertical. Below threshold raises the **evidence-gap warning** (SC-13) |
-| Partner coverage | 0.15 | Best partner tier rank among linked partners |
-| Compliance fit | 0.12 | Certifications held, with a bonus for sovereign ones |
-| Capability depth | 0.12 | `log1p(headcount) / log1p(10000)` — 7,000 experts is not 17× better than 400 |
-| External validation | 0.08 | An analyst position exists, or it does not |
-| Technology ownership | 0.08 | A portfolio-level prior from `technologies.yaml`, flagged in its own inputs as awaiting the deferred patents connector |
+| Component            | Weight | Source                                                                                                                                                     |
+| -------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Offer match          | 0.25   | 100 for a direct (L0) offer link, 55 for a bundle (L1), 0 otherwise — `config/business_graph/offers.yaml`                                                  |
+| Reference density    | 0.20   | Published customer stories apportioned onto the 15 verticals, normalised to the peak vertical. Below threshold raises the **evidence-gap warning** (SC-13) |
+| Partner coverage     | 0.15   | Best partner tier rank among linked partners                                                                                                               |
+| Compliance fit       | 0.12   | Certifications held, with a bonus for sovereign ones                                                                                                       |
+| Capability depth     | 0.12   | `log1p(headcount) / log1p(10000)` — 7,000 experts is not 17× better than 400                                                                               |
+| External validation  | 0.08   | An analyst position exists, or it does not                                                                                                                 |
+| Technology ownership | 0.08   | A portfolio-level prior from `technologies.yaml`, flagged in its own inputs as awaiting the deferred patents connector                                     |
 
 Both scores also drive derived state without a second model: the **horizon** (Now
 / Next / Later) from evidence dates and published Orange commitment anchors, and
@@ -366,7 +367,7 @@ non-tier-4 evidence.
 1. **It explains itself, which was the governing constraint.** §3.8: "the scoring
    model must not produce only a number — it must explain the number, and if a
    user cannot explain why a topic is ranked where it is, the scoring is not good
-   enough." Every component returns its value *and* the inputs that produced it,
+   enough." Every component returns its value _and_ the inputs that produced it,
    and both are persisted. That is why the explain modal is possible at all; it
    was not retrofitted.
 
@@ -390,7 +391,7 @@ non-tier-4 evidence.
 5. **It is the right baseline to be replaced.** The correct long-run answer is a
    learned per-role ranking from expert pairwise comparisons — which needs 300–600
    labels that do not exist on day one. So the MVP ships the transparent baseline
-   *plus* the capture and replay harness the learned model will need: feedback
+   _plus_ the capture and replay harness the learned model will need: feedback
    capture, retained raw archives, and publication-date leakage control so a
    backtest is possible without re-fetching. A transparent wrong weight is
    fixable by argument; an opaque learned weight trained on no labels is not.
@@ -419,7 +420,7 @@ plus a critique plus one entailment check per claim — so cost per token, not
 benchmark position, was the deciding factor for a corpus this size, and
 DeepSeek's published price per token is a small fraction of the frontier models'
 at an output quality that survives the critic. But the provider is the
-*replaceable* part, and that is the actual design decision:
+_replaceable_ part, and that is the actual design decision:
 `deepseek | openai | ollama | mock` is an `.env` change, not a re-architecture,
 and Ollama is there because Orange sells trusted AI on sovereign infrastructure
 and a design that cannot run in a French datacentre is the wrong design. `mock`
@@ -434,19 +435,19 @@ system prompt automatically.
 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, run locally.
 Three specific reasons, in order:
 
-* **Multilingual is not optional here.** FR-28 requires English and French
+- **Multilingual is not optional here.** FR-28 requires English and French
   ingestion and the corpus is 9,594 English, 1,054 French, 314 Spanish, 197
   German, 193 Italian and 137 Dutch items. Table 36 names "anglophone and EU
   bias in sources" as a risk — an English-only encoder would bake that bias into
-  the clusters, and clustering is upstream of *everything*: a French tender that
+  the clusters, and clustering is upstream of _everything_: a French tender that
   fails to cluster with its English equivalent becomes a separate theme, a
   separate candidate space, and a duplicate that dedup never sees.
-* **Local means free and reproducible.** Zero marginal cost per refresh over a
+- **Local means free and reproducible.** Zero marginal cost per refresh over a
   corpus this size, no second provider dependency, no per-call variance, and the
   sovereign option stays open. An API embedding would have added a vendor to the
   critical path of a stage whose whole justification (Table 23) is that it is
   "deterministic and reproducible".
-* **Small enough to be ordinary.** 12 layers, 384 dimensions, runs on a laptop
+- **Small enough to be ordinary.** 12 layers, 384 dimensions, runs on a laptop
   without a GPU. A larger encoder would improve cluster quality at the margin and
   make the pipeline undeployable on the machines it actually runs on. A TF-IDF +
   SVD fallback exists so a checkout with no model download still runs — with a
@@ -454,17 +455,17 @@ Three specific reasons, in order:
 
 **Everything else, and what each is doing.**
 
-| Package | Where | Why this one |
-|---|---|---|
-| `scikit-learn` — agglomerative clustering | Stage 4, themes | Chosen over k-means and HDBSCAN specifically because it needs **no k, no random initialisation and no minimum cluster count**. SC-11 requires identical inputs to give identical output; a seeded k-means is reproducible only if you also version the seed |
-| `scipy.optimize.milp` (HiGHS) | Planner | Portfolio selection under entry slots, capability headcount, concentration caps and a horizon mix is a constrained optimisation with an optimum, not a ranking to truncate. HiGHS ships inside scipy — no separate solver, no licence, no install step for whoever runs this next. It also reports **which constraint bound**, which is the output a ranked list structurally cannot produce |
-| `FastAPI` + `uvicorn` + `pydantic` | Read API | Typed request/response contracts that match the pipeline's stage contracts, and one process serving both the API and the built bundle from the same origin. The application-level auth guard is a FastAPI dependency rather than a per-route decorator, because the failure mode of a per-route guard is the route somebody forgot |
-| `SQLite` | Everywhere | The database is **one file**, which is what makes the deployment story work: the whole corpus ships as a build artefact, seeds onto `/home` once, and the replay archive lives inside it. Correct for a single-writer batch pipeline plus a read API; it would be the wrong choice under concurrent writers, and that limit is named rather than discovered |
-| `reportlab` | Briefs, plan report | Renders the PDF *and* draws the solution diagram to a deterministic geometry from a model-emitted structure. Chosen over an HTML-to-PDF pipeline because that needs a browser, and a browser in the serving container is hundreds of megabytes and a sovereignty problem |
-| `python-pptx`, `python-docx` | Pre-sales collateral | Pre-sales edits decks and documents; a PDF-only pack gets retyped. Both are pure Python, so five output formats cost no LibreOffice and no conversion service |
-| `pymupdf` | Tests only | Reads the generated PDFs back so the tests assert **what a reader sees** — including that every text frame on every generated slide fits its box, which is how four overflowing chart labels were caught |
-| `numpy`, `pandas` | Throughout | Vector operations on embeddings and the sizing arithmetic |
-| `React` + `Vite` + `TypeScript`, **no chart library** | Frontend | The radar's encoding is specific to this product — angular sector is business domain, radius is time horizon, marker size is attractiveness, marker colour is right to win — and every chart library would have been fought rather than used. Hand-drawn SVG also made the palette auditable, which is what let the contrast failures be measured rather than argued about. Two runtime dependencies total |
+| Package                                               | Where                | Why this one                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scikit-learn` — agglomerative clustering             | Stage 4, themes      | Chosen over k-means and HDBSCAN specifically because it needs **no k, no random initialisation and no minimum cluster count**. SC-11 requires identical inputs to give identical output; a seeded k-means is reproducible only if you also version the seed                                                                                                                                                |
+| `scipy.optimize.milp` (HiGHS)                         | Planner              | Portfolio selection under entry slots, capability headcount, concentration caps and a horizon mix is a constrained optimisation with an optimum, not a ranking to truncate. HiGHS ships inside scipy — no separate solver, no licence, no install step for whoever runs this next. It also reports **which constraint bound**, which is the output a ranked list structurally cannot produce               |
+| `FastAPI` + `uvicorn` + `pydantic`                    | Read API             | Typed request/response contracts that match the pipeline's stage contracts, and one process serving both the API and the built bundle from the same origin. The application-level auth guard is a FastAPI dependency rather than a per-route decorator, because the failure mode of a per-route guard is the route somebody forgot                                                                         |
+| `SQLite`                                              | Everywhere           | The database is **one file**, which is what makes the deployment story work: the whole corpus ships as a build artefact, seeds onto `/home` once, and the replay archive lives inside it. Correct for a single-writer batch pipeline plus a read API; it would be the wrong choice under concurrent writers, and that limit is named rather than discovered                                                |
+| `reportlab`                                           | Briefs, plan report  | Renders the PDF _and_ draws the solution diagram to a deterministic geometry from a model-emitted structure. Chosen over an HTML-to-PDF pipeline because that needs a browser, and a browser in the serving container is hundreds of megabytes and a sovereignty problem                                                                                                                                   |
+| `python-pptx`, `python-docx`                          | Pre-sales collateral | Pre-sales edits decks and documents; a PDF-only pack gets retyped. Both are pure Python, so five output formats cost no LibreOffice and no conversion service                                                                                                                                                                                                                                              |
+| `pymupdf`                                             | Tests only           | Reads the generated PDFs back so the tests assert **what a reader sees** — including that every text frame on every generated slide fits its box, which is how four overflowing chart labels were caught                                                                                                                                                                                                   |
+| `numpy`, `pandas`                                     | Throughout           | Vector operations on embeddings and the sizing arithmetic                                                                                                                                                                                                                                                                                                                                                  |
+| `React` + `Vite` + `TypeScript`, **no chart library** | Frontend             | The radar's encoding is specific to this product — angular sector is business domain, radius is time horizon, marker size is attractiveness, marker colour is right to win — and every chart library would have been fought rather than used. Hand-drawn SVG also made the palette auditable, which is what let the contrast failures be measured rather than argued about. Two runtime dependencies total |
 
 **How the data sources were selected.** 42 catalogued, 33 wired, across 17
 connector types. Four rules decided which:
@@ -490,25 +491,25 @@ connector types. Four rules decided which:
 
 The individual choices worth defending:
 
-* **TED is the single most valuable source** — 4,267 signals, and the only one
+- **TED is the single most valuable source** — 4,267 signals, and the only one
   where a buyer states a budget. It works twice: as demand-side evidence, and as
   the observed contract value that prices the bottom-up market size. It is also
   where the worst sampling bug lived (40 of 14,485 notices, all from one day),
   which is the argument for reading what actually landed in the database rather
   than trusting a connector that returns 200.
-* **Eurostat is the denominator, and deliberately not a signal.** 56,385
+- **Eurostat is the denominator, and deliberately not a signal.** 56,385
   observations across five series live in their own reference tables. An annual
   statistical series has no publisher diversity, no momentum and no relevance;
   pushing it through the signal store would corrupt every component that counts
   attached signals while adding nothing to discovery.
-* **GDELT is kept despite being the worst-behaved source in the set** — it
+- **GDELT is kept despite being the worst-behaved source in the set** — it
   rate-limits aggressively and is the long pole in every refresh — because it is
   the only source with real publisher diversity per signal (153 distinct
   publishers from 281 items) and the only geo-tagged news in the corpus. The
   trade-off it forced is written into `config/sources.yaml` as a comment: depth
   over breadth, because an unsliced GDELT has a 14-day memory and a six-period
   momentum slope over a 14-day memory measures the result-set length.
-* **SEC EDGAR earns its place on a different axis.** Named enterprises describing
+- **SEC EDGAR earns its place on a different axis.** Named enterprises describing
   their own deployments, under a legal obligation to be accurate — which is a
   materially different kind of evidence from a press release about the same
   deployment.
@@ -563,29 +564,29 @@ PYTHONPATH=src python3 -m radar.cli refresh --stages describe
 
 Useful commands:
 
-| Command | What it does |
-|---|---|
-| `radar check` | Validate config, print vocabulary sizes, flag unconfirmed source terms |
-| `radar topics --role sales` | Role-ranked topic list (FR-13) |
-| `radar show OS012` | Full decomposition: claims, sources, links, score breakdown (NFR-01) |
-| `radar whitespace` | High attractiveness, no portfolio path (FR-32) |
-| `radar orphan-offers` | Offers with no live topic — portfolio decay (FR-33) |
-| `radar coverage` | Language / geography / tier coverage (NFR-08) |
-| `radar replay --date 2024-06-01` | Historical replay with leakage controls (FR-35) |
-| `radar confirm-link <pattern> --decision confirmed --curator x` | Curator link decision (LK-06) |
-| `radar reference-data` | Fetch the Eurostat denominators market sizing needs (§4.3.4) |
-| `radar size` | Compute market size per opportunity space, both methods (§4.3.4) |
-| `radar competition` | Assess competitive intensity per space (§4.3.3) |
-| `radar describe --limit 40` | Write the long-form descriptions and solution diagrams (FR-14) |
-| `radar brief OS012 --open` | Render the sales/presales PDF brief (FR-18) |
-| `radar competitor-scrape` | Crawl competitor sites into the profiling corpus, robots-aware |
-| `radar competitor-profile` | Build a structured profile per competitor from that corpus |
-| `radar competitor-analysis` | Per-topic competitor analysis and the differentiation angle |
-| `radar plan --narrate --pdf` | Build a five-year portfolio plan, write the business plan, export it as one PDF |
-| `radar plans` | List stored plans with their headline figures |
-| `radar plan --source workflow --from-stage demand_tested` | Plan the set the stage gate has already committed to, rather than choosing one |
-| `radar delete-space OS123` | Remove a space — prints the impact first, and says what it does *not* take |
-| `radar internal add \| moderate \| promote` | Internal signal intake — conversations, RFP themes, lost deals |
+| Command                                                         | What it does                                                                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `radar check`                                                   | Validate config, print vocabulary sizes, flag unconfirmed source terms          |
+| `radar topics --role sales`                                     | Role-ranked topic list (FR-13)                                                  |
+| `radar show OS012`                                              | Full decomposition: claims, sources, links, score breakdown (NFR-01)            |
+| `radar whitespace`                                              | High attractiveness, no portfolio path (FR-32)                                  |
+| `radar orphan-offers`                                           | Offers with no live topic — portfolio decay (FR-33)                             |
+| `radar coverage`                                                | Language / geography / tier coverage (NFR-08)                                   |
+| `radar replay --date 2024-06-01`                                | Historical replay with leakage controls (FR-35)                                 |
+| `radar confirm-link <pattern> --decision confirmed --curator x` | Curator link decision (LK-06)                                                   |
+| `radar reference-data`                                          | Fetch the Eurostat denominators market sizing needs (§4.3.4)                    |
+| `radar size`                                                    | Compute market size per opportunity space, both methods (§4.3.4)                |
+| `radar competition`                                             | Assess competitive intensity per space (§4.3.3)                                 |
+| `radar describe --limit 40`                                     | Write the long-form descriptions and solution diagrams (FR-14)                  |
+| `radar brief OS012 --open`                                      | Render the sales/presales PDF brief (FR-18)                                     |
+| `radar competitor-scrape`                                       | Crawl competitor sites into the profiling corpus, robots-aware                  |
+| `radar competitor-profile`                                      | Build a structured profile per competitor from that corpus                      |
+| `radar competitor-analysis`                                     | Per-topic competitor analysis and the differentiation angle                     |
+| `radar plan --narrate --pdf`                                    | Build a five-year portfolio plan, write the business plan, export it as one PDF |
+| `radar plans`                                                   | List stored plans with their headline figures                                   |
+| `radar plan --source workflow --from-stage demand_tested`       | Plan the set the stage gate has already committed to, rather than choosing one  |
+| `radar delete-space OS123`                                      | Remove a space — prints the impact first, and says what it does _not_ take      |
+| `radar internal add \| moderate \| promote`                     | Internal signal intake — conversations, RFP themes, lost deals                  |
 
 ---
 
@@ -682,20 +683,20 @@ lives in `config/` and is validated at load time — a dangling id is a startup
 error, not a runtime surprise, because §4.5.2 warns that crosswalk errors
 propagate silently into every downstream number.
 
-| File | Contents |
-|---|---|
-| `config/taxonomy/*.yaml` | 15 verticals, 59 use cases, 38 technologies, 6 domains, 9 personas, 6 signal types |
-| `config/settings.yaml` → `competitor_intel` | Crawl depth, pacing, URL filters and the per-run caps for competitor profiling |
-| `config/settings.yaml` | Weight set, thresholds, lifecycle, horizon, curation |
-| `config/strategy.yaml` | *Trust the future* ambitions — the strategic-relevance rubric |
-| `config/sources.yaml` | Source catalogue (42 catalogued, 33 wired) with terms-of-use position |
-| `config/source_tiers.yaml` | Four-tier scheme + publisher overrides |
-| `config/business_graph/*.yaml` | Offers, references, partners, certifications, capabilities |
-| `config/crosswalks/*.csv` | CPV → vertical / use case, vertical → NACE, technology → adoption series; versioned, confidence per row |
-| `config/sizing.yaml` | Sizing scope, datasets, contract-value rules, uncertainty bands, share assumptions |
-| `config/business_graph/competitors.yaml` | 65 named competitors with type, aliases, partner relationship, website and scrape status |
-| `config/role_modes.yaml` | Per-role ranking functions and link-type filters |
-| `config/economics.yaml` | Everything the Planner turns a market size into money with: margin by portfolio distance, ramp by horizon, capacity and effort, overlap discounts, and four figures quoted from Orange's own filed accounts |
+| File                                        | Contents                                                                                                                                                                                                    |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config/taxonomy/*.yaml`                    | 15 verticals, 59 use cases, 38 technologies, 6 domains, 9 personas, 6 signal types                                                                                                                          |
+| `config/settings.yaml` → `competitor_intel` | Crawl depth, pacing, URL filters and the per-run caps for competitor profiling                                                                                                                              |
+| `config/settings.yaml`                      | Weight set, thresholds, lifecycle, horizon, curation                                                                                                                                                        |
+| `config/strategy.yaml`                      | _Trust the future_ ambitions — the strategic-relevance rubric                                                                                                                                               |
+| `config/sources.yaml`                       | Source catalogue (42 catalogued, 33 wired) with terms-of-use position                                                                                                                                       |
+| `config/source_tiers.yaml`                  | Four-tier scheme + publisher overrides                                                                                                                                                                      |
+| `config/business_graph/*.yaml`              | Offers, references, partners, certifications, capabilities                                                                                                                                                  |
+| `config/crosswalks/*.csv`                   | CPV → vertical / use case, vertical → NACE, technology → adoption series; versioned, confidence per row                                                                                                     |
+| `config/sizing.yaml`                        | Sizing scope, datasets, contract-value rules, uncertainty bands, share assumptions                                                                                                                          |
+| `config/business_graph/competitors.yaml`    | 65 named competitors with type, aliases, partner relationship, website and scrape status                                                                                                                    |
+| `config/role_modes.yaml`                    | Per-role ranking functions and link-type filters                                                                                                                                                            |
+| `config/economics.yaml`                     | Everything the Planner turns a market size into money with: margin by portfolio distance, ramp by horizon, capacity and effort, overlap discounts, and four figures quoted from Orange's own filed accounts |
 
 **Changing any weight requires a new `weight_set` id.** Scores across a version
 boundary are not comparable, every score records the set that produced it
@@ -714,8 +715,8 @@ built under different bands can never be confused for one another.
 The model never invents an opportunity space from its own knowledge. Four
 hallucination defences, in the document's order of effectiveness (§4.4.4):
 
-1. **Evidence binding** — every claim cites signal ids, validated to exist *in
-   the cluster that produced the candidate*. Uncited claims are **stripped, not
+1. **Evidence binding** — every claim cites signal ids, validated to exist _in
+   the cluster that produced the candidate_. Uncited claims are **stripped, not
    rewritten**.
 2. **Closed-vocabulary output** — taxonomy values validated against the
    enumerations; a recognised synonym is repaired once, anything else is dropped.
@@ -731,17 +732,17 @@ which in the live run rejected 119 of 254 candidates with specific reasons.
 
 All three mechanisms the document asks for are implemented:
 
-* **Coverage-driven prompting.** The pipeline computes which taxonomy cells have
+- **Coverage-driven prompting.** The pipeline computes which taxonomy cells have
   evidence but no candidate yet and targets generation at exactly those. "This
   converts brainstorming from 'produce more ideas' into 'cover the evidenced
   grid', which terminates and is measurable."
-* **Diversity by construction.** Each cluster is passed over
+- **Diversity by construction.** Each cluster is passed over
   `candidates_per_cluster` times at temperature 0.85, and each pass is given a
   different **evidence lens** — regulatory, procurement, technology-maturity,
   cross-vertical. §4.4.3 warns that an open-ended loop "elaborates around
   whatever it produced first", so passes need different starting points to
   explore rather than paraphrase. Passes and clusters both run concurrently.
-* **Adversarial critique.** A separate critic prompt scores 1–5 as the *minimum*
+- **Adversarial critique.** A separate critic prompt scores 1–5 as the _minimum_
   across five tests, so one failure caps the whole score.
 
 The funnel over 27 clusters, live:
@@ -774,7 +775,7 @@ Sales sees L0–L1, presales L0–L2, strategy L1–L4. The sales acceptance cri
 in the vertical **and** no evidence gap.
 
 **One deliberate extension beyond Table 26.** Every L0–L4 definition describes a
-*delivery* capability. A certification, an analyst position, a published
+_delivery_ capability. A certification, an analyst position, a published
 reference and a capability pool are none of those — they are right-to-win
 evidence. Typing them L0 would mean any topic in a regulated vertical scored as
 a direct sell purely because Orange holds ISO 27001, which makes portfolio
@@ -821,11 +822,11 @@ someone to notice. Every transition records who moved it and why.
 
 **Model C — distributed assessment.** Each role rates **only its own axis**:
 
-| Role | Axis | Because |
-|---|---|---|
-| Strategist | Strategic fit | Owns where investment goes |
-| Sales | Customer demand | Authoritative on whether customers are asking |
-| Presales | Deliverability | Knows what it would actually take to build |
+| Role       | Axis            | Because                                       |
+| ---------- | --------------- | --------------------------------------------- |
+| Strategist | Strategic fit   | Owns where investment goes                    |
+| Sales      | Customer demand | Authoritative on whether customers are asking |
+| Presales   | Deliverability  | Knows what it would actually take to build    |
 
 Ratings are 0–5 with **written anchors** per level, plus a separate confidence,
 rather than a slider. §4.7.4: "People are unreliable at rating a topic 73 out of
@@ -890,16 +891,16 @@ palette values are taken verbatim from the reference instance in its documented
 slot order — the order is the colourblind-safety mechanism, so nothing is
 re-stepped or re-ordered.
 
-| Chart | Data's job | Encoding |
-|---|---|---|
-| Radar (polar) | four dimensions at once | position + area + sequential hue |
-| Vertical × domain heatmap | magnitude on a grid | sequential, **blue** — orange already means right-to-win, and reusing it would imply the same quantity |
-| Conviction vs evidence | polarity | **diverging**, two poles + a neutral grey midpoint, so agreement reads as nothing |
-| Stage funnel | position in a sequence | ordinal ramp — the reader sees the order in the colour |
-| Portfolio distance | ordered buckets | ordinal ramp |
-| Evidence over time | change over time | single hue; this is the series momentum is the slope *of* |
-| Signal-type mix | identity — the series ARE the subject | the only categorical chart, ≤6 slots, with a legend **and** a table view (three light-mode slots sit below 3:1, so the relief rule applies) |
-| KPI row | headline numbers | no chart at all |
+| Chart                     | Data's job                            | Encoding                                                                                                                                    |
+| ------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Radar (polar)             | four dimensions at once               | position + area + sequential hue                                                                                                            |
+| Vertical × domain heatmap | magnitude on a grid                   | sequential, **blue** — orange already means right-to-win, and reusing it would imply the same quantity                                      |
+| Conviction vs evidence    | polarity                              | **diverging**, two poles + a neutral grey midpoint, so agreement reads as nothing                                                           |
+| Stage funnel              | position in a sequence                | ordinal ramp — the reader sees the order in the colour                                                                                      |
+| Portfolio distance        | ordered buckets                       | ordinal ramp                                                                                                                                |
+| Evidence over time        | change over time                      | single hue; this is the series momentum is the slope _of_                                                                                   |
+| Signal-type mix           | identity — the series ARE the subject | the only categorical chart, ≤6 slots, with a legend **and** a table view (three light-mode slots sit below 3:1, so the relief rule applies) |
+| KPI row                   | headline numbers                      | no chart at all                                                                                                                             |
 
 ### Market size, with the working shown (§4.3.4)
 
@@ -914,10 +915,10 @@ re-stepped or re-ordered.
 So every space carries a size that is **computed, never quoted**, by two
 independent methods that are published side by side:
 
-| Method | What it is | Where each factor comes from |
-|---|---|---|
-| **Bottom-up** | enterprises × adoption × annual engagement value | Eurostat SBS (`sbs_sc_ovw`), Eurostat enterprise ICT survey, median matching TED tender |
-| **Observed tenders** | contracts that actually exist, annualised | TED notices whose CPV resolves to the space |
+| Method               | What it is                                       | Where each factor comes from                                                            |
+| -------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| **Bottom-up**        | enterprises × adoption × annual engagement value | Eurostat SBS (`sbs_sc_ovw`), Eurostat enterprise ICT survey, median matching TED tender |
+| **Observed tenders** | contracts that actually exist, annualised        | TED notices whose CPV resolves to the space                                             |
 
 Two methods rather than one is the point: figures built from different data that
 land in the same order of magnitude are an argument, and a figure with no method
@@ -928,21 +929,21 @@ right-to-win and portfolio distance and labelled as such everywhere it appears.
 
 Four decisions in that pipeline were load-bearing enough to be worth naming:
 
-* **The denominator and the adoption rate must share a base.** Eurostat
+- **The denominator and the adoption rate must share a base.** Eurostat
   publishes enterprise ICT adoption for firms with 10+ employees only. Multiplied
   by an all-sizes enterprise count — roughly 90% micro-firms — every estimate
   would have been out by an order of magnitude.
-* **The contract value has to come from the right kind of contract.** The CPV
-  crosswalk says what a notice is *about*; it does not say whether it is the kind
+- **The contract value has to come from the right kind of contract.** The CPV
+  crosswalk says what a notice is _about_; it does not say whether it is the kind
   of contract Orange would bid for. A €188m hydroelectric turbine retrofit,
   correctly crosswalked to industrial asset management, was setting the price of
   a zero-trust deployment until eligibility was tested on the notice's **main
   object** rather than any of its lots.
-* **A public tender is a large-organisation contract.** Applied flat it prices a
+- **A public tender is a large-organisation contract.** Applied flat it prices a
   twelve-person manufacturer's project at a ministry's budget, so engagement
   value is scaled per size class, anchored on the class the observed contracts
   came from. The weights are an assumption with an owner, printed in the brief.
-* **Proxies widen the range; they never move the base.** The enterprise ICT
+- **Proxies widen the range; they never move the base.** The enterprise ICT
   survey measures cloud, AI, IoT and security practice well and enterprise
   connectivity not at all, and it excludes finance, health, public administration
   and mining outright. Where a series has to stand in for another, the substitution
@@ -976,9 +977,9 @@ salesperson can use and a colleague can correct.
 Two kinds of presence are distinguished, because they are worth different things
 in a meeting:
 
-* **evidenced** — this space's own sources name the competitor. The signal id,
+- **evidenced** — this space's own sources name the competitor. The signal id,
   publisher and date travel with the claim and are clickable.
-* **structural** — the curated register says they sell this technology into this
+- **structural** — the curated register says they sell this technology into this
   vertical. True, useful, and not proof they are in the deal.
 
 The level is a band over a weighted count: category weight (a hyperscaler moves a
@@ -999,7 +1000,6 @@ and conviction, and kept as separate from them as they are from each other. A
 crowded field and a weak Orange position are different facts; averaging them would
 hide both.
 
-
 ### Competitor intelligence — what they say they sell (§4.3.3 extension)
 
 Competitive intensity says how crowded a space is. It does not say what those
@@ -1019,8 +1019,8 @@ robots    1 model     arithmetic  1 model call per topic
 
 **What a profile is allowed to do is the whole design.** A competitor's own
 website is **tier 4 — interested party** — exactly like a vendor press release.
-So a profile may *explain* a competitor the register already matched to a topic,
-and it may *seed* generation. It may not lift attractiveness or any other
+So a profile may _explain_ a competitor the register already matched to a topic,
+and it may _seed_ generation. It may not lift attractiveness or any other
 published score, and SC-09's guarantee that vendor-only evidence scores low is
 untouched. A candidate the competitor lens produces still has to bind to
 independent, non-vendor evidence to survive.
@@ -1046,15 +1046,15 @@ disallow crawling, three render their content client-side, three are unreachable
 
 Two defects worth knowing about, both now regression tests:
 
-* **The model echoed the vocabulary list.** Asked for OVHcloud's technologies it
-  returned the *first eight ids in vocabulary order* — private 5G, O-RAN,
+- **The model echoed the vocabulary list.** Asked for OVHcloud's technologies it
+  returned the _first eight ids in vocabulary order_ — private 5G, O-RAN,
   network slicing, satellite NTN. Every id valid, so closed-vocabulary validation
   passed all eight; OVHcloud's pages mention 5G zero times. A list-echo is the
   characteristic failure of handing a model an enumeration, and the enumeration
   is what makes it survive validation. Tags now need corroboration in the source
   text, word-boundary matched — the same rule `enrich` already applies to signal
   attachment.
-* **A citation proved a page was read, not that it said this.** "Accenture LED
+- **A citation proved a page was read, not that it said this.** "Accenture LED
   Flashlight" arrived as a named offer with a page id attached.
 
 Full detail: [`docs/COMPETITOR_INTELLIGENCE.md`](docs/COMPETITOR_INTELLIGENCE.md).
@@ -1069,10 +1069,10 @@ Prose is where a model invents, so all four defences of §4.4.4 apply to it in t
 same order of effectiveness as in synthesis:
 
 1. **Evidence binding.** The factual sections (`what_is_changing`,
-   `competitive_landscape`) must cite signal ids attached to *this* topic. A
+   `competitive_landscape`) must cite signal ids attached to _this_ topic. A
    section that cannot is stripped, not rewritten — and what was stripped is
    listed in the UI rather than quietly omitted. Sections that describe what
-   Orange would *do* are exempt: a proposal cannot be "supported by a source",
+   Orange would _do_ are exempt: a proposal cannot be "supported by a source",
    and demanding a citation for one would only teach the model to attach one at
    random.
 2. **Closed vocabulary**, applied to the diagram (below).
@@ -1098,17 +1098,17 @@ objections, the next action per role, and every source listed at the back.
 Three kinds of content meet on the page and are kept visibly distinct, because a
 reader has to know which is which:
 
-| | Produced by | Reproducible from |
-|---|---|---|
-| **computed** | `scoring`, `sizing`, `competition` | stored inputs (DR-05) |
-| **curated** | business graph, competitor register | config with a named owner (DR-11) |
-| **written** | the model, under the §4.4.4 defences | its cited signals |
+|              | Produced by                          | Reproducible from                 |
+| ------------ | ------------------------------------ | --------------------------------- |
+| **computed** | `scoring`, `sizing`, `competition`   | stored inputs (DR-05)             |
+| **curated**  | business graph, competitor register  | config with a named owner (DR-11) |
+| **written**  | the model, under the §4.4.4 defences | its cited signals                 |
 
 The last page carries the weight set, the sizing version, the register version
 and the prompt and model that wrote the prose (DR-10). A brief that cannot be
 traced is a brochure.
 
-**The diagram is not drawn by the model.** It emits a *structure* — layers,
+**The diagram is not drawn by the model.** It emits a _structure_ — layers,
 boxes, who provides each one, what flows where — which the renderer draws to the
 same geometry every time. A model asked for SVG or drawing code produces
 something that looks plausible and overlaps its own labels; a model asked for
@@ -1127,8 +1127,8 @@ The radar answers "which opportunity", one space at a time. The Planner answers
 different question, and the reason it opens full screen rather than in a pane.
 
 **Two sources for the portfolio, and they are different questions.** Under
-*Parameters* the caller states constraints and the optimiser chooses the set —
-the exploratory question, what *should* we do. Under *Workflow selected* the set
+_Parameters_ the caller states constraints and the optimiser chooses the set —
+the exploratory question, what _should_ we do. Under _Workflow selected_ the set
 is already decided: every opportunity space the collaboration board has moved to
 **Demand-tested or beyond** is in, and none of the constraints is applied to it,
 because each would overrule a decision a strategist, a salesperson or a presales
@@ -1174,7 +1174,7 @@ has to adjudicate. Sections that introduce a number are stripped and listed.
 
 **ROI is not offered, and that is deliberate.** There is no cost data — not in
 the filings at the granularity a space would need, not anywhere the pipeline can
-reach. A five-year *revenue and profit* projection is defensible from what
+reach. A five-year _revenue and profit_ projection is defensible from what
 exists; an ROI would require inventing the denominator.
 
 **Export to PDF.** A plan that has to leave the tool to be read is a plan that
@@ -1283,15 +1283,15 @@ detail path is untouched — and a test asserts the two paths produce byte-ident
 topics, because two code paths for one object is how two surfaces start
 disagreeing.
 
-| | Before | After |
-|---|---|---|
-| `/api/view` | 1.69 s · 343 kB · ~1,670 queries | **0.05 s · 84 kB · 11 queries** |
-| `/api/workflow/board` | 1.24 s · 2,151 kB | **0.04 s · 181 kB** |
+|                       | Before                           | After                           |
+| --------------------- | -------------------------------- | ------------------------------- |
+| `/api/view`           | 1.69 s · 343 kB · ~1,670 queries | **0.05 s · 84 kB · 11 queries** |
+| `/api/workflow/board` | 1.24 s · 2,151 kB                | **0.04 s · 181 kB**             |
 
 The board was shipping every topic's links, score components and rank
 explanation to render forty-word cards; it now sends what a card shows. The view
 drops the fields only the detail page renders. A test guards the query count
-against growing *with the number of topics*, which is the regression that would
+against growing _with the number of topics_, which is the regression that would
 make a list feel broken at 150 rows.
 
 ### Designed for the refresh, not the first run (§4.1)
@@ -1311,27 +1311,26 @@ reconstructs the state of the world as of that date.
 
 ---
 
-
 ---
 
 ## Where the build stands
 
 Read live from the working database, not typed here.
 
-| | |
-|---|---|
-| Opportunity spaces | **449** — 363 active, 40 watchlist, 29 fading, 17 candidate |
-| Grid coverage | 15 of 15 verticals · 51 of 59 use cases · 35 of 38 technologies |
-| Signals | **11,498** from 33 enabled sources, plus internal intake · 7,341 tier-1 · 1,054 French-language |
-| Evidence attachment | 11,602 signal-to-topic attachments across 325 theme clusters |
-| Business graph | 5,217 typed links onto 181 nodes and 182 edges |
-| Qualification | 752 market-size computations over 449 spaces · 336 with a bottom-up estimate · 213 competitive assessments |
-| Competitor intelligence | 1,745 pages from 53 of 65 competitors · 53 profiles · 176 per-topic analyses |
-| Outputs | 173 long-form descriptions · 173 PDF briefs · 15 pre-sales artefacts built across 5 formats |
-| Reference data | 56,385 Eurostat observations across five series |
-| Planning | 8 stored plans — the baseline parameter plan selects 51 spaces from 231 admissible; the workflow plan takes every committed space and drops none |
-| Workflow | 449 on the board — 446 Shortlisted, 2 Demand-tested, 1 Packaged |
-| Tests | **486 passing** |
+|                         |                                                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Opportunity spaces      | **449** — 363 active, 40 watchlist, 29 fading, 17 candidate                                                                                      |
+| Grid coverage           | 15 of 15 verticals · 51 of 59 use cases · 35 of 38 technologies                                                                                  |
+| Signals                 | **11,498** from 33 enabled sources, plus internal intake · 7,341 tier-1 · 1,054 French-language                                                  |
+| Evidence attachment     | 11,602 signal-to-topic attachments across 325 theme clusters                                                                                     |
+| Business graph          | 5,217 typed links onto 181 nodes and 182 edges                                                                                                   |
+| Qualification           | 752 market-size computations over 449 spaces · 336 with a bottom-up estimate · 213 competitive assessments                                       |
+| Competitor intelligence | 1,745 pages from 53 of 65 competitors · 53 profiles · 176 per-topic analyses                                                                     |
+| Outputs                 | 173 long-form descriptions · 173 PDF briefs · 15 pre-sales artefacts built across 5 formats                                                      |
+| Reference data          | 56,385 Eurostat observations across five series                                                                                                  |
+| Planning                | 8 stored plans — the baseline parameter plan selects 51 spaces from 231 admissible; the workflow plan takes every committed space and drops none |
+| Workflow                | 449 on the board — 446 Shortlisted, 2 Demand-tested, 1 Packaged                                                                                  |
+| Tests                   | **486 passing**                                                                                                                                  |
 
 Four numbers worth reading as gaps rather than achievements: **all 5,217 links
 are machine-proposed and unconfirmed** — LK-06 wants a named human on the first
@@ -1359,38 +1358,38 @@ and it was not — the first corpus showed the consequence, with whole branches 
 a 59-use-case vocabulary carrying no query at all while manufacturing and public
 sector ran away with the topic count.
 
-| Source | Category | Signals | Notes |
-|---|---|---|---|
-| TED | Procurement | 4,267 | Above-threshold EU tenders with CPV, country, buyer, value |
-| Google News (EN) | Signals | 1,488 | Queries derived from the taxonomy grid |
-| OpenAlex | Technology | 910 | Carries an Orange-affiliation flag (§2.5) |
-| Google News (FR) | Signals | 765 | French-language coverage |
-| Crossref | Technology | 603 | Peer-reviewed output by concept |
-| Google News (ES/DE/IT/NL/MEA/APAC) | Signals | 966 | Six further language and region editions |
-| GDELT | Signals | 296 | Rate-limited, see below |
-| BOAMP | Procurement | 289 | French below-threshold tenders (§4.3.3) |
-| CERT-BUND | Regulation | 243 | German national regulator |
-| arXiv | Technology | 236 | |
-| Bing News | Signals | 177 | |
-| Find a Tender | Procurement | 173 | UK post-Brexit notices |
-| EC "Have your say" | Regulation | 171 | Consultations with their feedback **deadline** |
-| Trade press | Signals | 156 | Curated industry titles |
-| SEC EDGAR | Demand | 142 | Named enterprises describing their own deployments, under legal obligation to be accurate |
-| EUR-Lex | Regulation | 86 | Dated legal instruments, stage inferred |
-| CORDIS | Technology | 77 | EU-funded projects — what Europe decided to fund |
-| TenderNed | Procurement | 77 | Dutch notices |
-| National regulators | Regulation | 86 | ANSSI, ACER, the EU financial regulators and peers |
-| Hacker News | Signals | 66 | Practitioner attention, tier 3 |
-| UK Contracts Finder | Procurement | 63 | |
-| IETF Datatracker | Technology | 51 | Standards timelines |
-| NIST · CISA · NCSC-UK · CERT-EU | Regulation | 100 | Standards and advisories |
-| Internal signals | Internal | 10 | Moderated conversations and RFP themes, tier 3 (§2.5) |
-| **Total** | | **11,498** | 7,341 tier-1 · 1,054 French-language |
+| Source                             | Category    | Signals    | Notes                                                                                     |
+| ---------------------------------- | ----------- | ---------- | ----------------------------------------------------------------------------------------- |
+| TED                                | Procurement | 4,267      | Above-threshold EU tenders with CPV, country, buyer, value                                |
+| Google News (EN)                   | Signals     | 1,488      | Queries derived from the taxonomy grid                                                    |
+| OpenAlex                           | Technology  | 910        | Carries an Orange-affiliation flag (§2.5)                                                 |
+| Google News (FR)                   | Signals     | 765        | French-language coverage                                                                  |
+| Crossref                           | Technology  | 603        | Peer-reviewed output by concept                                                           |
+| Google News (ES/DE/IT/NL/MEA/APAC) | Signals     | 966        | Six further language and region editions                                                  |
+| GDELT                              | Signals     | 296        | Rate-limited, see below                                                                   |
+| BOAMP                              | Procurement | 289        | French below-threshold tenders (§4.3.3)                                                   |
+| CERT-BUND                          | Regulation  | 243        | German national regulator                                                                 |
+| arXiv                              | Technology  | 236        |                                                                                           |
+| Bing News                          | Signals     | 177        |                                                                                           |
+| Find a Tender                      | Procurement | 173        | UK post-Brexit notices                                                                    |
+| EC "Have your say"                 | Regulation  | 171        | Consultations with their feedback **deadline**                                            |
+| Trade press                        | Signals     | 156        | Curated industry titles                                                                   |
+| SEC EDGAR                          | Demand      | 142        | Named enterprises describing their own deployments, under legal obligation to be accurate |
+| EUR-Lex                            | Regulation  | 86         | Dated legal instruments, stage inferred                                                   |
+| CORDIS                             | Technology  | 77         | EU-funded projects — what Europe decided to fund                                          |
+| TenderNed                          | Procurement | 77         | Dutch notices                                                                             |
+| National regulators                | Regulation  | 86         | ANSSI, ACER, the EU financial regulators and peers                                        |
+| Hacker News                        | Signals     | 66         | Practitioner attention, tier 3                                                            |
+| UK Contracts Finder                | Procurement | 63         |                                                                                           |
+| IETF Datatracker                   | Technology  | 51         | Standards timelines                                                                       |
+| NIST · CISA · NCSC-UK · CERT-EU    | Regulation  | 100        | Standards and advisories                                                                  |
+| Internal signals                   | Internal    | 10         | Moderated conversations and RFP themes, tier 3 (§2.5)                                     |
+| **Total**                          |             | **11,498** | 7,341 tier-1 · 1,054 French-language                                                      |
 
 Not wired, with the reason: Ofcom (403 to automated clients), BNetzA and BIPT
 (documented feed paths 404), ENISA (retired its RSS endpoints), 3GPP and ETSI
 (publish HTML, not feeds), EPO OPS (needs registration), PatentsView and ACLED
-(DNS failures), Eurostat and World Bank (reachable, but they are *reference*
+(DNS failures), Eurostat and World Bank (reachable, but they are _reference_
 data for bottom-up sizing rather than dated signals — see below).
 
 ### Three sampling bugs worth knowing about
@@ -1398,17 +1397,17 @@ data for bottom-up sizing rather than dated signals — see below).
 Each of these produced a plausible-looking corpus that was quietly wrong. All
 three were found by looking at what actually landed in the database.
 
-* **TED returned 40 of 14,485 matching notices, all from one day.** The API
+- **TED returned 40 of 14,485 matching notices, all from one day.** The API
   accepts no sort parameter and returns publication-date ascending, so a single
   capped request samples only the oldest day in the window — 182 of 218 notices
   from one date. Momentum (§4.6) is the slope of signal volume over trailing
   periods, so that corpus made every procurement-driven momentum figure
   meaningless. Fixed by slicing the window into 14-day chunks and querying each:
   now 827 notices across 35 distinct dates spanning the full 90 days.
-* **CORDIS returned nothing at all.** It leaks its own localisation template and
+- **CORDIS returned nothing at all.** It leaks its own localisation template and
   emits dates as `1 {{month_11}} 2023`, which failed date parsing, so every
   project was rejected as undated (DR-04) — silently, with no error.
-* **EUR-Lex yielded 20 distinct acts from 120 rows.** CELLAR returns one row per
+- **EUR-Lex yielded 20 distinct acts from 120 rows.** CELLAR returns one row per
   expression title and several titles share a work, so rows collapsed on URL
   dedup. The limit was raised to compensate; a EuroVoc-concept query is the
   proper Sprint 0 fix.
@@ -1418,9 +1417,9 @@ applies an aggressive per-IP cooldown and 429'd most requests during the build.
 It is paced at one request per 6s. Two guards keep one sick source from damaging
 a refresh:
 
-* **Graceful degradation** — a failing source is recorded in the refresh stats
+- **Graceful degradation** — a failing source is recorded in the refresh stats
   and never aborts the run.
-* **Circuit breaker** — after two exhausted requests to a host, the rest of that
+- **Circuit breaker** — after two exhausted requests to a host, the rest of that
   host's requests are skipped and the host is reported in `collect.errors`.
   Without it, ten blocked GDELT queries cost eleven minutes for zero data. GDELT
   is the long pole in every refresh: everything else finishes in 45 seconds
@@ -1430,13 +1429,13 @@ a refresh:
 sizing and are stored as reference observations rather than signals, for the
 reason given in the sizing section above:
 
-| Series | Dataset | Observations | What it gives |
-|---|---|---|---|
-| Structural business statistics | `sbs_sc_ovw` | 27,958 | Enterprise counts and turnover by NACE division, size class and country — the denominator |
-| Enterprise cloud use | `isoc_cicce_usen2` | 6,885 | Paid cloud adoption by NACE aggregate |
-| Enterprise AI use | `isoc_eb_ain2` | 11,440 | AI adoption by technology and NACE aggregate |
-| Enterprise IoT use | `isoc_eb_iotn2` | 2,759 | IoT adoption by purpose |
-| ICT security measures | `isoc_cisce_ran2` | 7,343 | Security practice by measure |
+| Series                         | Dataset            | Observations | What it gives                                                                             |
+| ------------------------------ | ------------------ | ------------ | ----------------------------------------------------------------------------------------- |
+| Structural business statistics | `sbs_sc_ovw`       | 27,958       | Enterprise counts and turnover by NACE division, size class and country — the denominator |
+| Enterprise cloud use           | `isoc_cicce_usen2` | 6,885        | Paid cloud adoption by NACE aggregate                                                     |
+| Enterprise AI use              | `isoc_eb_ain2`     | 11,440       | AI adoption by technology and NACE aggregate                                              |
+| Enterprise IoT use             | `isoc_eb_iotn2`    | 2,759        | IoT adoption by purpose                                                                   |
+| ICT security measures          | `isoc_cisce_ran2`  | 7,343        | Security practice by measure                                                              |
 
 30 geographies (EU27 aggregate plus member states, Norway and Switzerland), the
 last three published periods each, refetched only when older than the configured
@@ -1448,7 +1447,7 @@ dated, attributable growth statement rather than a generated one.
 Still not wired **as reference data**: OECD, ITU, IEA and the national statistics
 offices from Table 19. They matter for topics outside the European business
 economy — today those are sized on the covered subset and the shortfall is
-reported. SEC EDGAR is in the same Table 19 row and *is* wired, but as a signal
+reported. SEC EDGAR is in the same Table 19 row and _is_ wired, but as a signal
 source (142 items above): filings are dated, attributable statements of what a
 named enterprise deployed, not a statistical denominator, so they feed discovery
 rather than sizing.
@@ -1471,14 +1470,14 @@ depends on colour alone.
 way, in four tabs — the space, the competitors, the brief, the pre-sales pack.
 That is the order the questions arrive: what is this, who else is here, what do
 I send, and what comes after the meeting. The three-pane layout is right for
-working *through* the radar — filter, scan, open, compare, move on — and wrong
+working _through_ the radar — filter, scan, open, compare, move on — and wrong
 for the moment somebody actually reads a space, because §4.9 gives the detail
 pane ten sections and reading them in a 420px column beside a chart nobody is
 looking at any more is the narrowest possible view of the longest content in the
 interface. The pre-sales tab is last on purpose: putting it before the brief
 would suggest a team should build a tender response before they have had the
 first meeting. It lists all twelve pieces whether or not anything has been
-built, because what *could* be produced is as much of the answer as what has
+built, because what _could_ be produced is as much of the answer as what has
 been, and a screen that starts empty is one nobody presses a button on.
 
 **The Generate screen opens with a conversation, not a text box.** The box asked
@@ -1492,7 +1491,7 @@ publisher, date and cosine — beside the conversation. The Generate button is
 enabled by the corpus rather than by the assistant's opinion of itself, and
 where the two disagree the screen says so in either direction. The parameters
 route is still there for somebody who does know the taxonomy, and it shows the
-spaces that *already* match before spending a run on rediscovering them.
+spaces that _already_ match before spending a run on rediscovering them.
 
 **The brief view** is the middle pane rendering the PDF inline, with Download,
 Regenerate and a staleness warning when the topic has moved past the version the
@@ -1515,7 +1514,7 @@ is a staff directory with a slow interface.
 because every other control there is reversible and that one is not. The dialog
 asks the server what would go and reads the answer out first: thirteen tables
 point at a space, and "are you sure?" over a number nobody was shown is not a
-confirmation. It also says what is *not* lost — the signals are shared evidence
+confirmation. It also says what is _not_ lost — the signals are shared evidence
 and stay — and that a later refresh meeting the same taxonomy triple will
 synthesise the space again, because identity is the triple (DR-03) and deleting
 is a statement about the corpus as it stands, not a permanent veto.
@@ -1535,13 +1534,13 @@ and the built React bundle from the same origin, which is what the CORS list in
 ./scripts/deploy-azure.sh          # build, package, provision if needed, push
 ```
 
-| | |
-|---|---|
-| Subscription | Azure for Students (`9ca89421…`), tenant `33ac9060…` |
-| Resource group | `rg-railpulse-cloud` |
-| Region | France Central |
-| Plan / app | `plan-railpulse-cdb4ce` (F1, Linux, shared) / `web-orange-radar-1521f5` |
-| Runtime | Python 3.13, `python3 -m uvicorn main:app` (no script, no absolute paths — see below) |
+|                |                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------- |
+| Subscription   | Azure for Students (`9ca89421…`), tenant `33ac9060…`                                  |
+| Resource group | `rg-railpulse-cloud`                                                                  |
+| Region         | France Central                                                                        |
+| Plan / app     | `plan-railpulse-cdb4ce` (F1, Linux, shared) / `web-orange-radar-1521f5`               |
+| Runtime        | Python 3.13, `python3 -m uvicorn main:app` (no script, no absolute paths — see below) |
 
 Three deployment decisions worth recording, because each is a constraint someone
 will otherwise rediscover:
@@ -1561,10 +1560,10 @@ A container that exits is restarted, fifteen restarts exhaust the Free plan's
 erases the logs that would explain it. Five deployments failed that way before
 the design changed to make it impossible:
 
-* The startup command names **no absolute path and no console script**:
+- The startup command names **no absolute path and no console script**:
   `python3 -m uvicorn main:app`. This is the one that cost five deployments, and
   the cause is not obvious. App Service does not run the deployed tree in place.
-  Oryx builds it, compresses the result to `output.tar.zst`, and on *every*
+  Oryx builds it, compresses the result to `output.tar.zst`, and on _every_
   container start extracts that tarball to a fresh `/tmp/<hash>` which becomes
   the working directory. `/home/site/wwwroot` holds the tarball and nothing
   else, and the extraction path changes with each deploy — so no absolute path
@@ -1574,20 +1573,20 @@ the design changed to make it impossible:
   points at the extracted virtualenv) rather than `PATH` (which it does not
   extend), and `main.py` puts its own sibling `src` on `sys.path`, so both
   resolve relative to wherever the tarball happened to land.
-* Everything that wrapper used to do — seeding `/home/data/radar.db` from the
+- Everything that wrapper used to do — seeding `/home/data/radar.db` from the
   package, converting its journal mode, copying the briefs — is in
   `radar/bootstrap.py`, which runs inside the app, inside the venv, and catches
   everything it can hit.
-* `api.py` no longer dies when the database is unusable. It records the error
+- `api.py` no longer dies when the database is unusable. It records the error
   and `/healthz` answers **503 with the reason**, so a bad deployment describes
   itself over HTTPS instead of disappearing.
-**What a redeploy replaces, and what it never touches.** The database is seeded
-onto `/home` once and then *not* replaced, so a deployment cannot discard the
-feedback and workflow decisions production accumulated. That protection is right,
-and taken alone it is also why 62 briefs once sat on disk that nobody could open:
-the PDFs shipped, the rows that make them visible did not. So `bootstrap` brings
-`CONTENT_TABLES` forward from the package — the topics themselves plus
-`topic_descriptions`, `topic_briefs`, `topic_competition` and `market_sizes`.
+  **What a redeploy replaces, and what it never touches.** The database is seeded
+  onto `/home` once and then _not_ replaced, so a deployment cannot discard the
+  feedback and workflow decisions production accumulated. That protection is right,
+  and taken alone it is also why 62 briefs once sat on disk that nobody could open:
+  the PDFs shipped, the rows that make them visible did not. So `bootstrap` brings
+  `CONTENT_TABLES` forward from the package — the topics themselves plus
+  `topic_descriptions`, `topic_briefs`, `topic_competition` and `market_sizes`.
 
 Not unconditionally, and this is the part worth reading. An earlier version of
 this took those tables wholesale on the strength of a comment claiming the UI
@@ -1601,7 +1600,7 @@ since. The PDFs follow the same rule from the other end: `content_hash` is the
 SHA-256 of the file a row was written for, so the row decides which PDF belongs
 on disk, and a brief regenerated in production is recognised and left alone.
 
-Topics travel *with* their content rather than being frozen, because
+Topics travel _with_ their content rather than being frozen, because
 `opportunity_spaces.version` is what `brief_for_topic` compares against: shipping
 new briefs against frozen topics flags every one of them "the topic has been
 refreshed since". They are taken wholesale — the pipeline is their only writer.
@@ -1618,9 +1617,9 @@ is not. `tests/test_bootstrap_sync.py` pins all of it, including the case that
 matters most — a curator regenerates a brief, the next deploy lands, and their
 work is still there.
 
-* Briefs are resolved by **filename against the configured directory**, not by
+- Briefs are resolved by **filename against the configured directory**, not by
   the absolute path recorded in `topic_briefs.path`. That column records the
-  machine that *built* the PDF — a laptop the server has never seen — so taken
+  machine that _built_ the PDF — a laptop the server has never seen — so taken
   literally every brief 404s in Azure and the UI reports that none were ever
   generated. `resolve_brief()` falls back to `RADAR_BRIEF_DIR`, and both the
   file route and the metadata payload go through it so they cannot disagree.
@@ -1697,16 +1696,16 @@ every deployment look unhealthy. The session is an `HttpOnly`, `SameSite=Lax`
 cookie whose value is stored only as a SHA-256, and passwords are PBKDF2-HMAC-SHA256
 verifiers at OWASP's current iteration count — so a copy of the database file is
 neither a set of passwords nor a set of live logins, which matters when the
-database *is* a file on a share.
+database _is_ a file on a share.
 
 Two things that were true before it and are still worth acting on:
 
-* **The shipped account is `orange` / `orange`.** It exists so a fresh database
+- **The shipped account is `orange` / `orange`.** It exists so a fresh database
   is usable without a shell, it is flagged `must_change_password`, and the
   interface carries a banner until it is changed. Change it on first sign-in.
-* The generation endpoints (`POST /api/topics/{id}/description`, `POST
-  /api/topics/{id}/brief`) call the configured model with the deployed key, so
-  anyone who *can* sign in can spend it. The key in question was shared in
+- The generation endpoints (`POST /api/topics/{id}/description`, `POST
+/api/topics/{id}/brief`) call the configured model with the deployed key, so
+  anyone who _can_ sign in can spend it. The key in question was shared in
   plaintext over chat during development and should be rotated regardless.
 
 Defence in depth is still worth having — a password is one factor, and the
@@ -1743,14 +1742,14 @@ vocabulary tag the model supplied is dropped unless the pages corroborate it;
 that a named offer citing a page the page does not support is dropped; that a
 differentiation paragraph naming an unlinked Orange asset is stripped while the
 activity half survives; that a competitor absent from the topic cannot be added
-by the model; that a competitor whose site refused us is *marked* rather than
+by the model; that a competitor whose site refused us is _marked_ rather than
 omitted; and that re-running the cheap join never discards an expensive
 comparison that still holds.
 
 The sizing, competition and brief suites (48 tests) hold the same kind of line:
 that the denominator and the adoption rate share a size base; that a crosswalk's
 per-row confidence reaches the arithmetic rather than sitting in the CSV; that
-only a tender whose *main object* is an IT contract may price an engagement; that
+only a tender whose _main object_ is an IT contract may price an engagement; that
 a proxy widens the range without moving the base; that the confidence grade is
 the worst factor rather than an average; that SAM never exceeds TAM; that an
 uncited factual section is stripped; that a generated percentage or euro figure
@@ -1760,7 +1759,7 @@ that a diagram box cannot claim an Orange asset the graph does not hold.
 The planner, collateral, scoping, auth and deletion suites (137 tests) hold the
 newest lines: that identical inputs give an identical plan id, so a plan cannot
 be silently recomputed under changed assumptions; that a capability pool is never
-over-committed under the optimiser and *is* reported when a committed set
+over-committed under the optimiser and _is_ reported when a committed set
 over-commits it; that `selected_count == considered_count` under the workflow
 source, because nothing there may be dropped; that a committed space with no
 market size is declared rather than quietly missing; that **every text frame on
@@ -1772,7 +1771,7 @@ is refused; that signals survive a delete while their attachments do not; and
 that a plan which selected a deleted space is named rather than blocking the
 delete.
 
-The auth suite is worth one more sentence, because of *how* it tests. It **walks
+The auth suite is worth one more sentence, because of _how_ it tests. It **walks
 the router** rather than naming endpoints, so a route added without the guard
 fails a test that already exists. The failure mode of a per-route guard is the
 route somebody forgot, and a test that names endpoints has exactly the same
@@ -1780,22 +1779,22 @@ failure mode.
 
 Several of these tests caught real bugs during the build:
 
-* Shannon entropy is scale-invariant, so a uniform tier-4 discount cancelled out
+- Shannon entropy is scale-invariant, so a uniform tier-4 discount cancelled out
   entirely — six vendor blogs scored identically to six independent outlets.
   Fixed by applying the discount to the effective publisher count.
-* Certifications were typed L0, making portfolio distance meaningless for every
+- Certifications were typed L0, making portfolio distance meaningless for every
   topic in a regulated vertical.
-* `build_graph` wiped `graph_nodes` while `opportunity_links` held a foreign key
+- `build_graph` wiped `graph_nodes` while `opportunity_links` held a foreign key
   onto it, so a second rebuild failed. Fixed by upserting nodes and retiring the
   disappeared ones — which is also where LK-07 (withdrawn assets propagating to
   affected topics) now lives.
-* The exploration slot (§4.7.6) drew from all filtered topics rather than
+- The exploration slot (§4.7.6) drew from all filtered topics rather than
   role-eligible ones, so it could show a salesperson a topic with no proof point
   — bypassing the very filter §4.5.3 requires.
-* A slide test that checked only the bullet column passed while four chart labels
-  on the same slide overflowed off the edge. It now walks *every* text frame on
+- A slide test that checked only the bullet column passed while four chart labels
+  on the same slide overflowed off the edge. It now walks _every_ text frame on
   every slide, which is what should have been asserted the first time.
-* The scoping gate corroborated a brief against its taxonomy **labels**, and the
+- The scoping gate corroborated a brief against its taxonomy **labels**, and the
   labels are approximations — closed lists of 15 verticals, 59 use cases and 32
   technologies mean a proposal is filed under the nearest available cell. Tenders
   for private-5G video surveillance duly "corroborated" a brief about
@@ -1809,20 +1808,20 @@ Several of these tests caught real bugs during the build:
 
 Matching the MVP exclusions in Table 15, plus what this pass did not reach:
 
-| Not built | Why |
-|---|---|
-| CRM integration | Deferred by the briefing; public assets give a sufficient right-to-win proxy |
-| Learned scoring models | No labels exist on day one. The MVP ships the transparent baseline and the capture/replay harness the learned models need (§4.7) |
-| Patent connector | Needs EPO OPS registration or BigQuery credentials. Technology ownership currently uses a portfolio-level prior from `technologies.yaml` |
-| Headless-browser rendering | Three competitor sites render client-side only. Adding a browser to a pipeline that deliberately has none, for three profiles of sixty-five, is not the trade |
-| Learned per-role ranking | Needs 300–600 expert comparisons; the capture widget ships first |
-| Backtest evaluation harness | The replay path exists (FR-35); the metrics of §4.7.5 are not implemented |
-| Per-role authorisation | Sign-in answers *who*; it does not yet answer *may they*. Every signed-in account can currently move a stage, delete a space and spend model budget |
-| Rate limiting on generation | Sign-in bounds who can reach the endpoints that spend model budget, not how often they may |
-| ROI on a plan | There is no cost data at the granularity a space would need — not in the filings, not anywhere the pipeline can reach. Revenue and profit are defensible from what exists; an ROI would require inventing the denominator |
+| Not built                   | Why                                                                                                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CRM integration             | Deferred by the briefing; public assets give a sufficient right-to-win proxy                                                                                                                                              |
+| Learned scoring models      | No labels exist on day one. The MVP ships the transparent baseline and the capture/replay harness the learned models need (§4.7)                                                                                          |
+| Patent connector            | Needs EPO OPS registration or BigQuery credentials. Technology ownership currently uses a portfolio-level prior from `technologies.yaml`                                                                                  |
+| Headless-browser rendering  | Three competitor sites render client-side only. Adding a browser to a pipeline that deliberately has none, for three profiles of sixty-five, is not the trade                                                             |
+| Learned per-role ranking    | Needs 300–600 expert comparisons; the capture widget ships first                                                                                                                                                          |
+| Backtest evaluation harness | The replay path exists (FR-35); the metrics of §4.7.5 are not implemented                                                                                                                                                 |
+| Per-role authorisation      | Sign-in answers _who_; it does not yet answer _may they_. Every signed-in account can currently move a stage, delete a space and spend model budget                                                                       |
+| Rate limiting on generation | Sign-in bounds who can reach the endpoints that spend model budget, not how often they may                                                                                                                                |
+| ROI on a plan               | There is no cost data at the granularity a space would need — not in the filings, not anywhere the pipeline can reach. Revenue and profit are defensible from what exists; an ROI would require inventing the denominator |
 
 Two rows moved out of this table during this pass and are worth naming, because
-both were listed as *not built* in an earlier edition of this README:
+both were listed as _not built_ in an earlier edition of this README:
 **collaboration workflow (FR-25)** is the stage gate and per-role assessment
 described above, and **slide export** now exists — not as a PowerPoint variant of
 the brief, but as four of the twelve pre-sales artefacts, which is what the
@@ -1881,11 +1880,11 @@ same reason.
 
 Three things are still absent and are named rather than implied:
 
-* **Per-role authorisation.** Sign-in answers *who*, not *may they*. Every
+- **Per-role authorisation.** Sign-in answers _who_, not _may they_. Every
   signed-in account can move a stage, delete a space and spend model budget.
-* **Rate limiting on the generation endpoints.** Sign-in bounds who reaches them,
+- **Rate limiting on the generation endpoints.** Sign-in bounds who reaches them,
   not how often.
-* **An audit log** distinct from the workflow transition history.
+- **An audit log** distinct from the workflow transition history.
 
 The seeded account is `orange` / `orange`, flagged `must_change_password`, and
 the interface warns on every screen until that is cleared. Accounts are created

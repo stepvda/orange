@@ -589,7 +589,7 @@ for each defect above.
 **Added.** [`API.md`](API.md), [`DATA_MODEL.md`](DATA_MODEL.md),
 [`OPERATIONS.md`](OPERATIONS.md), [`DECISIONS.md`](DECISIONS.md),
 [`COMPETITOR_INTELLIGENCE.md`](COMPETITOR_INTELLIGENCE.md), this changelog, and a
-[docs index](README.md).
+[docs index](DOCUMENTATION.md).
 
 `API.md` and `DATA_MODEL.md` are generated from the running application and the
 live schema, so they cannot drift from the code.
