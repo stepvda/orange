@@ -160,3 +160,100 @@ export const SECTION_ICONS: Record<string, (props: IconProps) => JSX.Element> = 
   feedback: IconThumb,
   sources: IconLink,
 }
+
+/* --- the top bar -------------------------------------------------------- *
+ *
+ * Same viewBox and stroke weight as everything above, because these sit in a
+ * row of buttons that are all one height: an icon drawn at a different scale
+ * makes its button look mis-set even when the box is identical.
+ *
+ * Each one is `aria-hidden` like the rest — the button's own text is its name,
+ * and where a button has no text (theme, sign out) the name is on the button.
+ */
+
+/** Strategist / Innovator — where to point the next quarter's effort. */
+export const IconCompass = svg(<>
+  <circle cx="12" cy="12" r="8.5" /><path d="m15.2 8.8-1.8 4.6-4.6 1.8 1.8-4.6z" />
+</>)
+
+/** Sales — the named-account conversation, drawn as what is being sold. */
+export const IconTag = svg(<>
+  <path d="M20.2 12.9 12.9 20.2a1.7 1.7 0 0 1-2.4 0l-6.3-6.3a1.7 1.7 0 0 1-.5-1.2V4.9a1.5 1.5 0 0 1 1.5-1.5h7.8c.45 0 .88.18 1.2.5l6 6a1.7 1.7 0 0 1 0 2.4z" />
+  <path d="M8.2 8.2h.01" />
+</>)
+
+/** Presales / Proposal — the bid being assembled. */
+export const IconClipboard = svg(<>
+  <path d="M9 4.5H7.4A1.6 1.6 0 0 0 5.8 6.1v13.3A1.6 1.6 0 0 0 7.4 21h9.2a1.6 1.6 0 0 0 1.6-1.6V6.1A1.6 1.6 0 0 0 16.6 4.5H15" />
+  <rect x="9" y="3" width="6" height="3.2" rx="1" />
+  <path d="M9.2 11.5h5.6M9.2 15.3h3.6" />
+</>)
+
+/** Radar — the sweep, not a target: the radar tab is the two-axis plot. */
+export const IconRadar = svg(<>
+  <path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5" /><path d="M12 8a4 4 0 1 0 4 4" />
+  <path d="M12 12 19 5" /><path d="M18.4 4.2h1.9v1.9" />
+</>)
+
+/** List — the ranked rows. */
+export const IconList = svg(<>
+  <path d="M9 6.5h11M9 12h11M9 17.5h11" />
+  <path d="M4.6 6.5h.01M4.6 12h.01M4.6 17.5h.01" />
+</>)
+
+/** Analytics — a measured portfolio, so bars rather than a trend line. */
+export const IconBars = svg(<>
+  <path d="M3.6 20.4h16.8" /><path d="M7 20.4v-6.2M12 20.4V6.8M17 20.4v-9.4" />
+</>)
+
+/** White space — the cell nothing has been written into yet. */
+export const IconWhitespace = svg(<>
+  <rect x="3.4" y="3.4" width="7.2" height="7.2" rx="1.2" />
+  <rect x="13.4" y="3.4" width="7.2" height="7.2" rx="1.2" />
+  <rect x="3.4" y="13.4" width="7.2" height="7.2" rx="1.2" />
+  <path d="M13.4 17h7.2M17 13.4v7.2" strokeDasharray="2 2.2" />
+</>)
+
+/** Coverage — how much of the grid has actually been assessed. */
+export const IconCoverageGrid = svg(<>
+  <rect x="3.4" y="3.4" width="17.2" height="17.2" rx="2" />
+  <path d="M3.4 9.6h17.2M9.6 3.4v17.2" />
+  <path d="m12.6 15.4 1.9 1.9 3.6-3.9" />
+</>)
+
+/** Detail — the reading pane, which is what the compact fallback opens. */
+export const IconPanel = svg(<>
+  <rect x="3.2" y="4.5" width="17.6" height="15" rx="1.8" /><path d="M12.4 4.5v15" />
+  <path d="M15 9.4h3.2M15 13h2.2" />
+</>)
+
+/** Generate — synthesis, not creation from nothing: a spark over the corpus. */
+export const IconSpark = svg(<>
+  <path d="m11 3.4 1.7 4.2 4.2 1.7-4.2 1.7L11 15.2 9.3 11 5.1 9.3l4.2-1.7z" />
+  <path d="m18 14.6.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
+</>)
+
+/** Planner — five years, so a calendar rather than a route. */
+export const IconCalendar = svg(<>
+  <rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2" /><path d="M3.4 10h17.2" />
+  <path d="M8.2 3.4v3.4M15.8 3.4v3.4" /><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.4h.01M12 17.4h.01" />
+</>)
+
+/* Theme. Three states, three marks — a single glyph that only changes meaning
+   is a control you have to click to understand. */
+export const IconSun = svg(<>
+  <circle cx="12" cy="12" r="4" />
+  <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" />
+</>)
+export const IconMoon = svg(<>
+  <path d="M20 14.2A8.4 8.4 0 0 1 9.8 4 8.5 8.5 0 1 0 20 14.2z" />
+</>)
+export const IconAutoTheme = svg(<>
+  <circle cx="12" cy="12" r="8.5" /><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor" stroke="none" />
+</>)
+
+/** Sign out — the door, with the direction of travel. */
+export const IconSignOut = svg(<>
+  <path d="M14.5 4.5H6.6A1.6 1.6 0 0 0 5 6.1v11.8a1.6 1.6 0 0 0 1.6 1.6h7.9" />
+  <path d="M15.4 8.4 19 12l-3.6 3.6M19 12h-8.6" />
+</>)

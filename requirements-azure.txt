@@ -21,6 +21,11 @@ requests>=2.31
 numpy>=1.26
 reportlab>=4.0
 
+# Pre-sales collateral in the formats pre-sales edits. Pure Python, so the
+# serving instance stays small and needs no LibreOffice or headless browser.
+python-pptx>=0.6.23
+python-docx>=1.1
+
 # Only used when a description or brief is generated on demand from the UI.
 # OpenAI-compatible client; the provider is whatever RADAR_LLM_PROVIDER names.
 openai>=1.40

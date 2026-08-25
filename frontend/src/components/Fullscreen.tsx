@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import BriefView from './Brief'
 import CompetitorAnalysisPanel from './CompetitorAnalysis'
+import PreSalesPanel from './PreSales'
 import TopicDetail from './TopicDetail'
 import type { WorkflowMeta } from './Workflow'
 import { HelpButton } from './Help'
@@ -24,9 +25,15 @@ import type { Meta, Topic } from '../types'
  * The competitor tab is the third view of the same subject: what everyone else
  * is doing in it. It sits between the two because that is the order the
  * questions arrive — what is this, who else is here, what do I send.
+ *
+ * Pre-sales collateral is last because it is what happens AFTER the brief has
+ * been sent and the meeting has happened. The brief is one document for one
+ * conversation; that tab is twelve, for the work between that conversation and
+ * a proposal, and putting it before the brief would suggest a team should build
+ * a tender response before they have had the first meeting.
  */
 
-type Pane = 'space' | 'competitors' | 'brief'
+type Pane = 'space' | 'competitors' | 'brief' | 'presales'
 
 interface Props {
   topic: Topic | null
@@ -116,6 +123,10 @@ export default function SpaceFullscreen({
                 the whole point of having both here is to catch that. */}
             {briefStale && <span className="fs-stale-dot" title="This brief is out of date">●</span>}
           </button>
+          <button aria-pressed={pane === 'presales'} onClick={select('presales')}
+                  title="Discovery, battlecards, solution outline, business case, PoC scope, tender blocks — in PDF, Office or OpenDocument">
+            Pre-sales
+          </button>
         </div>
 
         <div className="fs-help">
@@ -152,6 +163,12 @@ export default function SpaceFullscreen({
           </div>
         )}
         {pane === 'brief' && <BriefView topic={topic} onHelp={onHelp} />}
+        {pane === 'presales' && (
+          <div className="fs-space">
+            <PreSalesPanel topic={topic} topicId={topicId} refreshKey={refreshKey}
+                           onHelp={onHelp} />
+          </div>
+        )}
       </div>
     </div>
   )

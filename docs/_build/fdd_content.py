@@ -11,18 +11,19 @@ doc.cover(
     "Opportunity Spaces / Innovation Radar",
     "ORANGE BUSINESS  ·  INNOVATION RADAR",
     [("Document", "Functional Design Document (FDD)"),
-     ("Version", "1.1"),
+     ("Version", "1.2"),
      ("Status", "For review"),
-     ("Date", "21 August 2026"),
-     ("Applies to", "Innovation Radar MVP · pipeline version 0.1.0 · weight set w-2026-08-a"),
+     ("Date", "24 August 2026"),
+     ("Applies to", "Innovation Radar MVP · pipeline 0.1.0 · weight set w-2026-08-a · sizing size-2026-08-a · economics econ-2026-08-a"),
      ("Baseline", "Orange Innovation Radar — Requirements and Approach"),
      ("Companion", "Technical Architecture (TA), same date · docs/ reference set"),
      ("Audience", "Business sponsors, strategy, sales and presales leadership, product owners")],
     statement="An opportunity space is a Vertical × Use case × Technology with a human-readable statement. "
               "It carries two scores that are never combined — attractiveness and right to win — plus conviction "
               "and competitive intensity as separate quantities beside them, a market size computed bottom-up "
-              "from published statistics, a description bound to its own evidence, and a PDF brief a salesperson "
-              "can take into a meeting. Every claim is bound to a dated, attributable source, and every number "
+              "from published statistics, a description bound to its own evidence, a PDF brief a salesperson "
+              "can take into a meeting and twelve further pieces of pre-sales collateral in the format each reader "
+              "works in. A Planner turns the ranking into portfolio selection under a budget, and a five-year projection. Every claim is bound to a dated, attributable source, and every number "
               "decomposes into named components.")
 
 doc.toc([
@@ -40,9 +41,14 @@ doc.toc([
     (1, "9   Competitor intelligence"),
     (2, "9.1  What a profile may do  ·  9.2  The differentiation angle  ·  9.3  Coverage  ·  9.4  Where it appears"),
     (1, "10  Evidence discipline and the generation controls"),
+    (1, "10b Creating an opportunity space on demand"),
     (1, "11  Market sizing"),
+    (1, "11b The Planner — from a ranked list to a portfolio"),
+    (2, "11b.1 Two sources  ·  11b.2 What is projected  ·  11b.3 What it refuses to do"),
     (1, "12  Collaboration, ownership and team conviction"),
+    (1, "12b Pre-sales collateral"),
     (1, "13  Users, journeys and screens"),
+    (2, "13.5  Signing in  ·  13.6  Removing an opportunity space"),
     (1, "14  Conceptual data model"),
     (1, "15  Functional requirements catalogue"),
     (1, "16  Acceptance criteria"),
@@ -75,14 +81,18 @@ doc.bullets([
     "shows the working rather than hiding it behind a tooltip.",
 ])
 doc.callout("Current state of the working system", [
-    "418 opportunity spaces over a corpus of 11,354 signals from 33 enabled sources across 34 refreshes. "
+    "418 opportunity spaces over a corpus of 11,354 signals from 34 enabled sources across 40 refreshes. "
     "7,267 of those signals are tier-1 — regulators, procurement portals, standards bodies and official statistics.",
-    "4,832 typed links onto the Orange Business Graph. 313 market-size computations, 181 competitive "
-    "assessments, 174 long-form descriptions and 174 generated PDF briefs.",
+    "4,832 typed links onto the Orange Business Graph over 181 catalogued assets. 314 bottom-up market-size "
+    "computations, 181 competitive assessments, 174 long-form descriptions and 174 generated PDF briefs.",
     "1,745 pages read from 53 of 65 competitor websites, producing 53 structured competitor profiles and "
     "177 per-topic competitive analyses.",
     "56,385 Eurostat reference observations across five statistical series, held separately from the signal store.",
-    "294 automated tests covering the invariants that would be expensive to discover late.",
+    "Seven stored portfolio plans, from both sources. The baseline parameter plan selects 51 spaces from 231 "
+    "admissible ones under a stated budget; the workflow plan takes the two spaces the stage gate has moved to "
+    "Demand-tested and schedules them without dropping either.",
+    "Twelve pre-sales artefacts describable per space, in five output formats.",
+    "Sign-in in front of every /api path, and a delete that states its impact before it is taken.",
 ], SH_GREEN, GREEN)
 
 # ============================================================ 2
@@ -170,6 +180,10 @@ doc.bullets([
     "the customer names them.",
     "**Decision support** turns all of the above into something a named role can act on this week: a ranked view they "
     "are allowed to see, a decomposition of every number in it, and a document they can take into a meeting.",
+    "**Portfolio planning** answers the question a ranked list cannot: not which topic, but which SET — under a "
+    "budget and a capacity, or over a set the stage gate has already committed to. See section 11b.",
+    "**Collateral production** takes a qualified space through to the material a bid needs: twelve artefacts built "
+    "from one snapshot of the space, each in the format its reader actually works in. See section 12b.",
 ])
 doc.p("No capability group may reach past its neighbour. Qualification cannot re-open the evidence base; decision "
       "support cannot change what a number means. This is what makes each group independently testable, and it is why "
@@ -505,7 +519,65 @@ doc.p("Enrichment closes that gap as **retrieval plus rules rather than generati
       "close, and unchecked attachment would inflate exactly the components that depend on the count. Enrichment never "
       "writes a claim; only synthesis may do that, and only with citations.")
 
-# ============================================================ 10
+
+# ============================================================ 10b
+doc.h1("10b   Creating an opportunity space on demand")
+doc.p("Everything described so far arrives from a scheduled refresh. Two further routes exist for the case a refresh "
+      "cannot serve — somebody has a specific question now, about a cell of the grid the corpus has not yet been asked "
+      "about. Both end in the same synthesis run under the same four defences; they differ only in what the person "
+      "asking has to already know.")
+doc.figure(D + "fdd-14-generation-routes.png", "Figure 14 — Two routes into a new opportunity space, and the gate they share",
+           "The corpus decides whether a run may happen. The model proposes what to run.")
+doc.h2("10b.1  The parameters route")
+doc.p("A strategist who knows the taxonomy picks a vertical, a use case, a technology and a horizon. Before anything "
+      "is spent, the screen shows the opportunity spaces that **already** satisfy those criteria — because the most "
+      "common outcome of an on-demand run is rediscovering something the last refresh produced, and finding that out "
+      "afterwards costs four model calls and several minutes.")
+doc.h2("10b.2  The scoping conversation")
+doc.p("The route that replaced a text box. An opportunity space is a vertical × use case × technology plus a buyer's "
+      "problem and a place, and somebody who knows their market but not this taxonomy under-specified at least two of "
+      "those every time. The only feedback the box gave was a character count — which is the one failure that did not "
+      "matter. The real failure arrived minutes later, from a run that created nothing.")
+doc.p("So the assistant **interviews instead, with the corpus in front of it**. Every turn re-embeds the whole "
+      "transcript against the same stored signal vectors the run itself will read, at the same floor, and shows what "
+      "came back — publisher, date and cosine — beside the conversation. An answer that sharpens the idea therefore "
+      "sharpens the evidence the next question is asked from, and the assistant can say \"the tenders here are "
+      "German\" rather than \"which country?\". It is stateless: the transcript lives in the browser and arrives with "
+      "every request, so a reload loses a conversation rather than leaking one.")
+doc.h2("10b.3  Similarity is not support")
+doc.p("Retrieval clearing the floor only means the corpus contains text that reads like the brief. A brief for "
+      "municipal digital signage retrieves French public-sector IT tenders at the same 0.64 cosine a well-evidenced "
+      "brief about turbine gearboxes scores, because they are about the same sector in the same country — and "
+      "synthesis then produces candidates whose every claim the critic correctly rejects, because none of those "
+      "tenders mentions signage.")
+doc.p("A brief must therefore also be **corroborated**: a second, independent reason, on its use case or its "
+      "technology. The vertical is excluded, because it corroborates every brief ever written about a well-covered "
+      "sector. This is the rule the configuration already prescribes for evidence enrichment (section 10.2), reused "
+      "rather than reinvented.")
+doc.callout("The failure that made the gate judge sentences rather than labels", [
+    "The taxonomy is a set of closed lists — 15 verticals, 59 use cases, 32 technologies — so a proposal is regularly "
+    "filed under the nearest available cell rather than an exact one. A brief for advertising-funded municipal "
+    "screens was filed under citizen service automation × private 5G, because nothing closer exists.",
+    "Tenders for private-5G video surveillance corroborate the LABEL private 5G perfectly, and are no evidence "
+    "whatsoever for advertising screens. The gate reported four supporting signals, the button enabled, the run spent "
+    "four model calls, and the critic threw out every candidate with precisely that reason.",
+    "So the cheap model is now asked, on every proposed brief, about the brief's OWN SENTENCE, with the labels shown "
+    "as the approximation they are — and its answer overrules a label match. The vocabulary test stays for display, "
+    "because \"the term 'private 5g' appears in the signal text\" is a more checkable thing to show a reader than a "
+    "model's say-so, where the two agree.",
+], SH_ORANGE, ORANGE_DARK)
+doc.h2("10b.4  The corpus enables the button, not the assistant's mood")
+doc.p("The assistant is told to put a brief forward even while hedging about the evidence, because otherwise a "
+      "genuinely new idea has nothing to press Generate on. It duly writes \"the evidence is thin, marking this as "
+      "not ready\" — a fair remark about the corpus and a poor reason to disable a button whose brief has already "
+      "passed the same corroboration check the run applies.")
+doc.p("So **`ready` is simply whether anything here can be run**, and the model's own opinion travels beside it as "
+      "`model_ready`. The screen explains either disagreement rather than silently obeying one of them. Where a brief "
+      "cannot be run, the refusal names the reason before the model calls are spent, and the contributed-evidence "
+      "route (section 2.5 of the baseline — internal signals, moderated) opens instead, because that is the path that "
+      "can actually build it.")
+
+# ============================================================ 11
 doc.h1("11   Market sizing")
 doc.p("The requirements baseline issues a warning before it states a requirement: headline market-size figures in "
       "press coverage almost always originate from paid research houses, are quoted without methodology, and "
@@ -548,7 +620,104 @@ doc.p("Reference data lives in its own tables. Five Eurostat series feed the bot
       "interface shows as an adoption trend: machine learning in EU vehicle manufacturing went 3.2% (2023) → 4.8% "
       "(2024) → 7.8% (2025), which is a dated, attributable growth statement rather than a generated one.")
 
-# ============================================================ 11
+
+# ============================================================ 11b
+doc.h1("11b   The Planner — from a ranked list to a portfolio")
+doc.p("The radar ranks. A plan is a different object: given a budget, a capacity and a few preferences, which **set** "
+      "of opportunity spaces should Orange enter, in what **order**, and what does that set earn. Three things make "
+      "set selection different in kind from ranking, and all three are places where a ranked list gives the wrong "
+      "answer:")
+doc.bullets([
+    "**Shared build.** Spaces needing the same capability pay for it once. Ranked independently each carries the full "
+    "build and all of them look marginal; selected together the second is nearly free.",
+    "**The flywheel.** Winning the first deal in a vertical raises right to win for every other space in it, so "
+    "**sequence** is a decision variable rather than a presentation choice.",
+    "**Concentration.** Ranking by market size alone puts 18 of the top 20 spaces in manufacturing. Diversification is "
+    "a property of the set and is invisible per topic.",
+])
+doc.figure(D + "fdd-12-planner.png", "Figure 12 — The Planner: ranking answers which topic, a plan answers which set",
+           "Two sources ask two different questions. Everything downstream of the set is the same arithmetic, and none of it is a model.")
+doc.h2("11b.1  Two sources, and they are different questions")
+doc.table(
+    ["Source", "The question", "What the Planner is allowed to do"],
+    [["**Parameters**", "What *should* we do, given a budget and a capacity? Nothing has been decided yet.",
+      "Everything. The caller states constraints — budget in person-years, entry slots per year, a confidence floor, a "
+      "portfolio-distance cap, concentration caps, a horizon mix — and the optimiser chooses the set that maximises "
+      "the stated objective."],
+     ["**Workflow selected**", "What does the business we have *already committed to* actually earn, and when?",
+      "Almost nothing. Every space the stage gate has moved to Demand-tested or beyond is in. There is no evidence "
+      "floor, no distance cap, no concentration limit and no objective, because there is nothing left to optimise. "
+      "`selected_count` equals `considered_count`, and a test asserts it."]],
+    widths=[2.6, 5.6, 8.4])
+doc.p("That second mode is not a filtered version of the first. A space at Demand-tested has a salesperson's "
+      "judgement behind it; dropping it for resting on a modelled size, or for sitting one level too far out on "
+      "portfolio distance, answers a human decision with an assumption band. What is left to do is **scheduling** — "
+      "horizon says when the market arrives, entry slots say how many spaces can start together — and arithmetic.")
+doc.bullets([
+    "**Horizon spreads the set across time.** A `now` space may start in year one, a `later` space not before year "
+    "three, and a cohort larger than a year's entry slots cascades into the next year rather than pretending the "
+    "capacity exists. Within a cohort the earlier slots go to the largest commitments, so an over-subscribed year "
+    "defers the smallest rather than an arbitrary set.",
+    "**A Live space starts in year one whatever its horizon says.** Horizon describes when the market arrives, which "
+    "is a question already answered for something that is already selling. The stage pulls entry forward; it never "
+    "pushes it back.",
+    "**Over-commitment is the finding, not a reason to edit the portfolio.** Under the optimiser a capability pool "
+    "cannot be over-committed — it would not have selected past one. Here the business already has, so nothing is "
+    "dropped to make the numbers work: the pool that peaks above its available share is flagged with the size of the "
+    "gap, and the plan names what closes it — hiring, partnering, raising the share available for new work, or moving "
+    "a space back down the gate.",
+    "**A committed space with no market size is declared rather than dropped.** It is in the plan as far as the "
+    "business is concerned and absent from every figure on the page. Left silent it understates a portfolio the "
+    "reader believes is complete, so it is listed by id, flagged, and the totals are described as a floor.",
+])
+doc.h2("11b.2  What is projected, and on whose assumptions")
+doc.p("`config/economics.yaml` holds every assumption, versioned and owner-named on exactly the discipline "
+      "`config/sizing.yaml` established, and printed on the last page of every plan it produces. Two figures are "
+      "quoted from Orange's own filed accounts and marked as such; everything else is a planning band. **A plan built "
+      "under one version of that file is not comparable with a plan built under another**, and the interface will not "
+      "chart two such plans together silently.")
+doc.table(
+    ["Assumption", "What it does", "Why it is the one to argue about"],
+    [["**Margin by portfolio distance**", "L0 14% · L1 11% · L2 7.9% · L3 3% · L4 0%",
+      "The single most consequential number in the file. The filed 7.9% segment margin is FULLY LOADED — applying it "
+      "flat to incremental revenue asserts that new business carries the same overhead as existing business, which is "
+      "wrong in both directions. Varying it by distance moves five-year profit by about 1.66×, and revenue "
+      "concentrates at L0, so the L0 band dominates the answer. One table from Orange finance is worth more here than "
+      "any other single input."],
+     ["**Ramp by horizon**", "Share of obtainable market reached in each year after a space's OWN entry year",
+      "It is what makes staggered entry cost something. A space entering in year three is in the first year of its "
+      "own ramp, not the third year of the plan's."],
+     ["**Overlap discount**", "A second space in a vertical is discounted; a third sharing its use case more so",
+      "SOM is not additive. Obtainable share is computed per topic against the same customers' same budgets, and the "
+      "naive sum across all 418 spaces reaches 90% of Orange Business's entire segment revenue — which is not "
+      "arguable for incremental business in a segment declining 5.8% a year."],
+     ["**Discount rate**", "7.3% post-tax, from the filed accounts", "Quoted, not assumed. It is the Enterprise "
+      "cash-generating unit's own rate, and the segment took a €332m goodwill impairment in the same year."]],
+    widths=[3.0, 5.0, 8.6])
+doc.h2("11b.3  What it refuses to do")
+doc.p("**It is not a forecast, and it says so before the first figure.** Every projection carries its interval, the "
+      "versions of every assumption behind it, and a plausibility check against Orange's own filed segment revenue. "
+      "Where a plan's year-five revenue is an implausible share of that segment, the flag appears on the plan rather "
+      "than in a footnote, and describes the number as a scenario ceiling.")
+doc.p("**What is not in the plan says whose decision that was.** Under the parameter source the exclusion list names "
+      "the constraint that bound — the confidence floor, the distance cap, a concentration limit. Under the workflow "
+      "source it names a stage instead: still at Shortlisted, stopped on the board, or unsized. Nothing there was "
+      "excluded by the Planner, and the document says so.")
+doc.p("**The prose knows which question it is answering.** A narrative written for a committed set may not describe "
+      "alternatives being weighed, because none were. The narrative is a model writing about the projection under the "
+      "numeric guard — it may not introduce a figure that is not already in the plan — and the prompt splits on the "
+      "source so that it cannot describe a selection that did not happen.")
+doc.callout("Why an optimiser rather than a learned model", [
+    "Selection under constraints is a multi-dimensional knapsack. It solves exactly, in under a second at this size, "
+    "and it explains itself: which constraint bound, and what one more euro or one more engineer would buy. A learned "
+    "recommender could do none of that, and NFR-01/NFR-03 require every number to decompose.",
+    "There are also no labels. 418 spaces and zero historical outcomes is a spreadsheet, not a training set. The "
+    "model's job in this subsystem is to WRITE the plan, not to choose it.",
+    "Where the solver is unavailable or the program is infeasible, a greedy fill runs instead and NAMES each soft "
+    "constraint it had to relax, rather than returning a set that quietly ignores one.",
+], SH_BLUE, BLUE)
+
+# ============================================================ 12
 doc.h1("12   Collaboration, ownership and team conviction")
 doc.p("Two collaboration models are implemented, chosen because they are the two that touch scoring.")
 doc.figure(D + "fdd-06-workflow.png", "Figure 6 — Collaboration: the stage gate and team conviction",
@@ -580,7 +749,66 @@ doc.callout("The line conviction is not allowed to cross",
              "An unrated topic sits **neutral**, not last. Treating \"nobody has looked yet\" as \"everybody hates it\" "
              "would be a popularity bias, not a judgement."], SH_GREEN, GREEN)
 
-# ============================================================ 12
+
+# ============================================================ 12b
+doc.h1("12b   Pre-sales collateral")
+doc.p("The brief is one document for one conversation. This is the twelve pieces a team needs **between** that "
+      "conversation and a proposal: a discovery and qualification pack, an outreach sequence, a first-meeting deck, a "
+      "value hypothesis, a reference pack, competitor battlecards, a solution outline, a PoC scoping sheet, a partner "
+      "brief, commercial model options, tender response blocks and a bid risk register.")
+doc.figure(D + "fdd-13-presales.png", "Figure 13 — Pre-sales collateral: twelve pieces from one snapshot",
+           "The catalogue is shown in full whether or not anything has been built: what COULD be produced is as much "
+           "of the answer as what has been, and a screen that starts empty is one nobody presses a button on.")
+doc.h2("12b.1  One snapshot, twelve documents")
+doc.p("The space is read **once** and every renderer works from that reading. Two documents in the same pack quoting "
+      "different SAM figures — one built before a sizing run and one after — is the failure this makes impossible "
+      "rather than merely unlikely.")
+doc.h2("12b.2  The format is the reader's choice, per piece")
+doc.p("Documents emit as PDF, Word or OpenDocument; decks as PowerPoint, OpenDocument or PDF. The default is the "
+      "format the artefact wants to be, and that default is an argument about the artefact rather than a preference:")
+doc.table(
+    ["Piece", "Default", "Because"],
+    [["Competitor battlecards", "PDF", "It is read on a phone in a car park, and must not have been edited since it "
+      "was approved."],
+     ["Solution outline (HLD)", "PowerPoint", "The first thing a solution architect does with it is paste two slides "
+      "into their own deck. Handing them a PDF makes them rebuild it."],
+     ["Tender response blocks", "Word", "It is paste-fodder for a Word response. A PDF of paste-fodder is actively "
+      "obstructive."],
+     ["Outreach sequence", "Markdown", "Nobody has ever wanted a PDF of six emails."]],
+    widths=[3.6, 2.4, 10.6])
+doc.p("Formats **coexist**: asking for Word after you have the PDF gives you both, because that is obviously what was "
+      "meant. A deck is never offered as Word — one idea per page is the only property that made it a deck. An "
+      "unsupported format is refused with the alternatives named, never satisfied silently under the wrong extension.")
+doc.h2("12b.3  Charts are vector where it matters")
+doc.p("Eleven chart types are drawn with exact geometry: a TAM/SAM/SOM funnel, a value waterfall, a payback curve, a "
+      "competitive field map, a risk matrix, a buying-centre map, a component ownership map, a portfolio path, a "
+      "phase timeline, a scope boundary and coverage bars. In PowerPoint they are **native shapes**, so an architect "
+      "moves a box rather than redrawing the slide; in PDF they are drawn geometry. Word and OpenDocument get the same "
+      "picture rasterised at high resolution, because neither has a drawing model this code can target — and the trade "
+      "is the right way round, since the format people send and the format people edit both get true vector output.")
+doc.p("The palette was validated rather than chosen: each colour does exactly one job — identity, order, magnitude, "
+      "polarity or state — and the ordinal and categorical sets were run through a contrast and colour-vision check. "
+      "The brand rule holds: orange means Orange, or it means emphasis. It is never slot four of a competitor "
+      "palette, which is why the field map names competitors instead of colouring them.")
+doc.h2("12b.4  It looks at the public record before writing")
+doc.p("The corpus is refreshed on a cadence; a battlecard is written the morning of a meeting. A regulator's deadline "
+      "or a competitor's announcement lives in that gap. So a short, targeted research pass runs through the "
+      "connectors the pipeline already trusts — same session, same throttling, same robots discipline, content held "
+      "by reference only. Anything drawn from a retrieved item names its publisher inline, and every item the writer "
+      "saw is listed at the back so a citation can be followed. Those items have **not** been through the radar's "
+      "evidence validation, and each document says so.")
+doc.callout("A piece whose inputs are missing still builds", [
+    "The expensive inputs are prepared once for whichever pieces need them. Where an input is cheap and deterministic "
+    "— a market size, a competitive assessment — it is generated; where it is not, the gap is reported.",
+    "But nothing here refuses to produce a document. A pre-sales engineer who asked for a solution outline and got an "
+    "error has nothing. One who got the outline with \"built without the written description\" across the top has the "
+    "component map, the portfolio path, and a clear instruction about what to do next.",
+    "Staleness is reported PER INPUT rather than per space. A pack whose battlecard was built against last month's "
+    "competitor register and whose value case was built this morning is exactly the failure that tracking exists to "
+    "make visible.",
+], SH_ORANGE, ORANGE_DARK)
+
+# ============================================================ 13
 doc.h1("13   Users, journeys and screens")
 doc.p("Eight views sit over one read model. The role changes what may be seen and how it is ordered; it never changes "
       "what a number means.")
@@ -615,7 +843,38 @@ doc.p("The interface was reviewed adversarially by seven independent reviewers w
       "with elapsed time; and below 1080px — which is what 200% browser zoom looks like to the layout — the detail "
       "pane is taken over by the middle pane rather than hidden.")
 
-# ============================================================ 13
+doc.h2("13.5  Signing in")
+doc.p("Everything the product serves is internal: competitive analysis of named companies, Orange's own asset graph, "
+      "market estimates with the workings attached, and the stage-gate opinions of people who work here. None of it "
+      "should be readable by whoever finds the URL. Every path except the sign-in endpoints themselves now requires a "
+      "session, and the interface shows who is signed in and offers a password change from every screen.")
+doc.p("An empty database seeds one account, `orange` / `orange`, flagged **must change password**. That flag is not "
+      "decoration: a warning appears on every screen while it is set, because a default credential nobody is reminded "
+      "about is a permanent one. Accounts are managed from the command line rather than from the running application, "
+      "so a hijacked session cannot mint itself a permanent login.")
+doc.h2("13.6  Removing an opportunity space")
+doc.p("A synthesis result that is wrong could previously only be retracted by editing the database by hand. A space "
+      "can now be deleted from its detail pane — but the interesting part is not the delete, which the foreign keys "
+      "already cascaded. It is what the person is told **first**: the dialog asks the server for the impact and reads "
+      "it out before showing the button, and the result names again what went.")
+doc.bullets([
+    "**The evidence survives.** Only the attachment rows go. A signal is evidence about the world that several spaces "
+    "may cite; deleting a synthesis result must not delete the reading it was synthesised from.",
+    "**Duplicates folded into this space go with it.** A merged record is a tombstone saying \"this triple is the same "
+    "topic as that one\". If the survivor is removed, clearing the pointer instead would resurrect duplicates against "
+    "the identity rule in section 5.1.",
+    "**Plans are named, not blocked.** A plan that selected this space keeps its stored projection, which was "
+    "computed once and is immutable by design. Refusing the delete would make any space that ever appeared in a plan "
+    "permanent; silently breaking the plan would be worse. So the impact names the plans, and so does the result.",
+])
+doc.callout("Deletion is not suppression", [
+    "Identity is the vertical × use case × technology triple. A later refresh that meets the same triple in the "
+    "evidence will synthesise the space again — with a new id, and with none of the history removed here.",
+    "Removing a space is a statement about the corpus as it stands, not a permanent veto. Anything that needs to be "
+    "permanent belongs in the taxonomy or the source catalogue, not in a delete.",
+], SH_ORANGE, ORANGE_DARK)
+
+# ============================================================ 14
 doc.h1("14   Conceptual data model")
 doc.p("Figure 10 is the business-level view of what the system stores and how the objects relate. The physical schema, "
       "with columns, keys, indexes and constraints, is in the Technical Architecture, sections 11.2 to 11.5.")
@@ -648,7 +907,15 @@ doc.table(
      ["Competitor profile", "What a competitor says it sells, each claim carrying the page that said it — or a "
       "recorded reason why there is no profile", "Competitor"],
      ["Competitor analysis", "Per topic: the join onto competitor profiles, plus the written comparison and the "
-      "differentiation angle per competitor", "Topic"]],
+      "differentiation angle per competitor", "Topic"],
+     ["Plan", "One portfolio plan: the stated inputs, the selected set with entry years, the projection, the flags "
+      "and the narrative", "A fingerprint of the inputs and the assumption versions — so a plan is immutable"],
+     ["Plan selection", "One selected space within one plan: its entry year, margin band, overlap discount and "
+      "capability pool", "Plan + topic"],
+     ["Collateral", "One built pre-sales piece, recorded with the versions of everything it printed",
+      "Topic + kind + format"],
+     ["User", "Who may sign in. A username and a verifier — never a password", "Username"],
+     ["Session", "One live sign-in, stored only as the hash of its cookie value", "The hash"]],
     widths=[3.0, 9.4, 4.2])
 
 # ============================================================ 14

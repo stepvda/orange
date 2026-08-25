@@ -1,5 +1,13 @@
 """Build the hands-on walkthrough video (docs/Orange_Innovation_Radar_Walkthrough.mp4).
 
+SUPERSEDED BY docs/build_demo.py. That build covers everything this one does and
+four subsystems this one predates — the Planner, the pre-sales pack, the scoping
+conversation and sign-in — and it records HEADED, so the embedded PDFs actually
+render. This script is kept because the film it produced is still in docs/ and a
+build that cannot be re-run is a film nobody can correct. Do not extend it;
+extend build_demo.py.
+
+
 A different film from Orange_Innovation_Radar.mp4. That one explains the
 thinking; this one shows a person how to actually use the tool. So the deck is
 cut to three slides — just enough vocabulary to follow along — and the rest is a
@@ -289,9 +297,20 @@ def record_tour(durations: dict[str, float]) -> Path:
                 print(f"  skipped {what}: {str(exc).splitlines()[0][:90]}")
 
         # The header repeats view names in a skip-nav landmark, so scope by group.
+        # Two groups, because the top bar has two: the view tabs, and the tray
+        # holding Generate / Workflow / Planner. Workflow is a tab that lives in
+        # the second one — it renders in the reading layout like every other tab,
+        # but it is read beside the two controls that also change the portfolio.
         def tab(name: str):
-            safe(lambda: page.get_by_label("View").get_by_role(
-                "button", name=name, exact=True).click(), f"tab {name}")
+            def click() -> None:
+                for group in ("View", "Portfolio"):
+                    button = page.get_by_role("group", name=group).get_by_role(
+                        "button", name=name, exact=True)
+                    if button.count():
+                        button.first.click()
+                        return
+                raise LookupError(f"no {name!r} button in the View or Portfolio groups")
+            safe(click, f"tab {name}")
             page.wait_for_timeout(500)
 
         def role(name: str):

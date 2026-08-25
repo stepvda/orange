@@ -41,6 +41,9 @@ SCRIPTS = [
     "ta_erd2",     # 8, 9, 10 parts 2-4
     # Added with competitor intelligence: FDD 11 and TA 12
     "new_diags",
+    # Added with the Planner, pre-sales collateral, scoping and access control:
+    "fdd_g",       # FDD 12 planner, 13 pre-sales collateral, 14 generation routes
+    "ta_e",        # TA 13 planner internals, 14 collateral build, 15 access + deletion
 ]
 
 

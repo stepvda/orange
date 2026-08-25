@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { HelpButton } from './Help'
+import BriefChat from './BriefChat'
 import type {
-  GenerationConstraints, GenerationJob, GenerationMatch, GenerationOptions, Meta, Topic,
+  GenerationConstraints, GenerationJob, GenerationMatch, GenerationOptions, HypothesisRequest,
+  Meta, Topic,
 } from '../types'
 import { EMPTY_CONSTRAINTS, constraintCount } from '../types'
 
@@ -31,6 +33,14 @@ import { EMPTY_CONSTRAINTS, constraintCount } from '../types'
  *    silently dropped. "Asked for eight, created three" arrives with the gate
  *    the other five died at, so "the evidence in this slice does not support
  *    eight" is distinguishable from a bug.
+ *
+ * There are two ways in, and they are TABS rather than two halves of one form,
+ * because they are different questions. "Cover more of the grid" is asked with
+ * filters and a count and answers "where is the radar thin?". "Describe a
+ * space" is one specific idea somebody arrived with, and it used to be a
+ * textarea whose only feedback was a character count — the one failure that did
+ * not matter. It is now a conversation that can see the corpus (see BriefChat).
+ * Stacking them meant the second was always below the fold of the first.
  */
 
 interface Props {
@@ -336,7 +346,9 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
   const [job, setJob] = useState<GenerationJob | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
-  const [brief, setBrief] = useState('')
+  /** Which way in. Tabs rather than a stacked form: they are different
+   *  questions, and the second used to live below the fold of the first. */
+  const [mode, setMode] = useState<'grid' | 'chat'>('grid')
   const notified = useRef<string | null>(null)
 
   const active = job?.status === 'queued' || job?.status === 'running'
@@ -418,14 +430,30 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
       .finally(() => setStarting(false))
   }, [count, constraints])
 
-  const startFromBrief = useCallback(() => {
+  /** Run what the conversation composed. One job for however many briefs it
+   *  landed on — synthesis holds the only write lock on the taxonomy triple, so
+   *  three separate requests would just collect 409s. */
+  const startFromBriefs = useCallback((descriptions: string[]) => {
+    if (descriptions.length === 0) return
     setStarting(true)
     setError(null)
-    api.startGenerationFromBrief(brief.trim())
+    api.startGenerationFromBriefs(descriptions)
       .then((started) => { setJob(started); notified.current = null })
       .catch((e) => setError(String(e).replace(/^Error:\s*/, '')))
       .finally(() => setStarting(false))
-  }, [brief])
+  }, [])
+
+  /** Build a space the corpus is silent about, on contributed evidence. Same
+   *  run, same curation — what differs is that the evidence was written down by
+   *  the person asking rather than fetched, and is attributed to them. */
+  const startFromHypothesis = useCallback((body: HypothesisRequest) => {
+    setStarting(true)
+    setError(null)
+    api.startGenerationFromHypothesis(body)
+      .then((started) => { setJob(started); notified.current = null })
+      .catch((e) => setError(String(e).replace(/^Error:\s*/, '')))
+      .finally(() => setStarting(false))
+  }, [])
 
   const cancel = useCallback(() => {
     if (!job) return
@@ -443,9 +471,6 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
   )
 
   const blocked = options ? !options.ready : false
-  const minBrief = options?.min_brief_chars ?? 40
-  const maxBrief = options?.max_brief_chars ?? 600
-  const briefLength = brief.trim().length
 
   return (
     <div className="gen-screen">
@@ -468,9 +493,69 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
       )}
       {error && <p className="gen-error">{error}</p>}
 
-      <div className="gen-body">
-        <section className="gen-panel gen-form" aria-labelledby="gen-form-head">
-          <h3 id="gen-form-head">Cover more of the grid</h3>
+      {/* The two ways in. Same pipeline, same curation, same validation — what
+          differs is only what steers the model, and which question you arrived
+          with. */}
+      <div className="gen-tabs" role="tablist" aria-label="How to generate">
+        <button
+          role="tab"
+          id="gen-tab-grid"
+          aria-selected={mode === 'grid'}
+          aria-controls="gen-panel-grid"
+          className={`gen-tab${mode === 'grid' ? ' is-on' : ''}`}
+          onClick={() => setMode('grid')}
+        >
+          Cover more of the grid
+          <span className="gen-tab-sub">filters and a count — where is the radar thin?</span>
+        </button>
+        <button
+          role="tab"
+          id="gen-tab-chat"
+          aria-selected={mode === 'chat'}
+          aria-controls="gen-panel-chat"
+          className={`gen-tab${mode === 'chat' ? ' is-on' : ''}`}
+          onClick={() => setMode('chat')}
+        >
+          Describe a space
+          <span className="gen-tab-sub">talk it through with the corpus in front of you</span>
+        </button>
+      </div>
+
+      {/* One body in both modes, so the run report and "already in the radar"
+          stay put when the tab changes. The chat takes the whole width because
+          it carries its own evidence column; the grid form does not need it. */}
+      <div className={`gen-body${mode === 'chat' ? ' is-chat' : ''}`}>
+        {mode === 'chat' && (
+          <section className="gen-panel gen-chat-panel" id="gen-panel-chat"
+                   role="tabpanel" aria-labelledby="gen-tab-chat">
+            <h3>Describe one opportunity space — and be asked about it</h3>
+            <p className="gen-note gen-note-lead">
+              Tell the radar what you are looking for and it will interview you until the idea is
+              specific enough to retrieve real evidence with. What you say is a{' '}
+              <b>search brief, not evidence</b>: it retrieves the closest corroborated signals
+              already collected, and those become the only facts a space may rest on. The
+              difference from a text box is that the assistant can see that corpus while you are
+              still talking — so “the radar has nothing close to that” arrives as a question now
+              rather than as an empty run in ten minutes.
+              <HelpButton topic="generation" onOpen={onHelp} />
+            </p>
+            <BriefChat
+              meta={meta}
+              options={options}
+              active={active}
+              starting={starting}
+              blocked={blocked}
+              onGenerate={startFromBriefs}
+              onHypothesis={startFromHypothesis}
+              onOpenTopic={onOpenTopic}
+            />
+          </section>
+        )}
+
+        {mode === 'grid' && (
+        <section className="gen-panel gen-form" id="gen-panel-grid"
+                 role="tabpanel" aria-labelledby="gen-tab-grid">
+          <h3>Cover more of the grid</h3>
           <p className="gen-note gen-note-lead">
             Synthesise across the evidence as a whole, optionally bounded to a slice of it.
           </p>
@@ -558,46 +643,8 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
               </span>
             )}
           </div>
-          <div className="gen-divider" role="separator" />
-
-          {/* The second way in. Same pipeline, same curation — the difference is
-              only what steers the model, and the copy is careful about that
-              because "describe it and get it" is exactly the promise a
-              generation UI should not make. */}
-          <h3 id="gen-brief-head">Or describe one opportunity space</h3>
-          <p className="gen-note gen-note-lead">
-            Write what you are looking for and the radar builds <b>one</b> space around it — if the
-            corpus supports it. Your sentence is a <b>search brief, not evidence</b>: it retrieves
-            the closest corroborated signals already collected, and those become the only facts the
-            space may rest on. If nothing in the corpus is close enough, the run says so and creates
-            nothing rather than writing your sentence back to you with citations that do not
-            support it.
-          </p>
-          <textarea
-            className="gen-brief"
-            rows={4}
-            value={brief}
-            maxLength={maxBrief}
-            disabled={active || blocked}
-            aria-labelledby="gen-brief-head"
-            placeholder="Acoustic-sensor gearbox monitoring for offshore wind operators in the North Sea, sold as a managed service…"
-            onChange={(e) => setBrief(e.target.value)}
-          />
-          <div className="gen-brief-foot">
-            <span className="gen-quiet">
-              {briefLength < minBrief
-                ? `${minBrief - briefLength} more character${minBrief - briefLength === 1 ? '' : 's'} — `
-                  + 'name the sector, who has the problem, and what would be deployed'
-                : `${briefLength} of ${maxBrief} characters`}
-            </span>
-            <button className="gen-go gen-go-brief" onClick={startFromBrief}
-                    disabled={active || starting || blocked || briefLength < minBrief}>
-              {active && job?.kind === 'brief'
-                ? <><span className="spinner" /> Generating…</>
-                : 'Generate this space'}
-            </button>
-          </div>
         </section>
+        )}
 
         <section className="gen-panel gen-matches" aria-labelledby="gen-matches-head">
           <div className="gen-matches-head">
@@ -608,11 +655,15 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
             </span>
           </div>
           <p className="gen-note">
-            {selected === 0
-              ? 'Every live space, since nothing is selected. Narrow the filters to see what is '
-                + 'already covered before adding to it.'
-              : 'These already meet the criteria you selected. A run that lands on one of their '
-                + 'taxonomy triples refreshes it rather than creating a new space.'}
+            {mode === 'chat'
+              ? 'Every live space. The assistant checks this list as you talk and will name the '
+                + 'space by id if the conversation converges on a taxonomy triple one of them '
+                + 'already holds.'
+              : selected === 0
+                ? 'Every live space, since nothing is selected. Narrow the filters to see what is '
+                  + 'already covered before adding to it.'
+                : 'These already meet the criteria you selected. A run that lands on one of their '
+                  + 'taxonomy triples refreshes it rather than creating a new space.'}
             {' '}Counted across the whole corpus, not through a role filter — generation writes to
             all of it.
           </p>

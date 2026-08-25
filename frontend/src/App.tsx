@@ -12,12 +12,64 @@ import PlannerScreen from './components/Planner'
 import ScoreExplainModal from './components/ScoreExplain'
 import { LoginScreen, PasswordDialog } from './components/Login'
 import { useAnnounce } from './components/Announcer'
+import {
+  IconAutoTheme, IconBars, IconBoard, IconCalendar, IconClipboard, IconCompass,
+  IconCoverageGrid, IconDoc, IconList, IconMoon, IconPanel, IconPerson, IconRadar,
+  IconSignOut, IconSpark, IconSun, IconTag, IconWhitespace,
+} from './components/Icons'
 import { formatEur } from './components/MarketSize'
 import { api, setSessionEndedHandler } from './api'
 import type { Coverage, FilterState, Meta, RadarView, SessionInfo, SortId, Topic, User } from './types'
 import { EMPTY_FILTERS } from './types'
 
 type Tab = 'radar' | 'list' | 'brief' | 'detail' | 'workflow' | 'analytics' | 'whitespace' | 'coverage'
+
+/** Radar and List are ONE view rendered two ways — the same ranked set, plotted
+ *  against the two axes or laid out as rows — so they are boxed together the way
+ *  the roles are. Which of the two you want is a rendering preference; the four
+ *  after them are different questions about the corpus. */
+const RANKED_TABS: readonly Tab[] = ['radar', 'list'] as const
+const OTHER_TABS: readonly Tab[] = ['brief', 'analytics', 'whitespace', 'coverage'] as const
+
+/* `workflow` is in neither: it is still a tab — it renders inside the reading
+   layout like the rest — but it is READ beside Generate and Planner, because
+   those three are what a team does TO the portfolio rather than ways of looking
+   at it. It is rendered in that tray. */
+
+const TAB_LABELS: Record<Tab, string> = {
+  radar: 'Radar', list: 'List', brief: 'Brief', detail: 'Detail',
+  workflow: 'Workflow', analytics: 'Analytics', whitespace: 'White space', coverage: 'Coverage',
+}
+
+const TAB_ICONS: Record<Tab, (props: { className?: string }) => JSX.Element> = {
+  radar: IconRadar, list: IconList, brief: IconDoc, detail: IconPanel,
+  workflow: IconBoard, analytics: IconBars, whitespace: IconWhitespace, coverage: IconCoverageGrid,
+}
+
+/** Role id -> mark. Keyed off the ids in `role_modes.yaml`; an id this does not
+ *  know still gets a button, with the generic person mark, rather than a hole. */
+const ROLE_ICONS: Record<string, (props: { className?: string }) => JSX.Element> = {
+  strategist: IconCompass, sales: IconTag, presales: IconClipboard,
+}
+
+/** A top-bar label, set on up to two lines.
+ *
+ * The row has to hold fourteen controls on one line at 2560px, and its widest
+ * labels are two halves of one thing — "White space", "Presales / Proposal".
+ * Stacking those halves costs no height (every button in the row is one fixed
+ * height, so the two-line ones were already paying for the space) and buys back
+ * the width that was pushing Generate and the account onto a second row.
+ *
+ * The slash goes with the break. It was only ever there to separate the two
+ * halves and the line break already does that. Nothing is lost to a screen
+ * reader: the button carries the unbroken label as its accessible name.
+ */
+function TopLabel({ text }: { text: string }) {
+  const parts = text.includes(' / ') ? text.split(' / ')
+    : text.split(' ').length === 2 ? text.split(' ')
+    : [text]
+  return <span className="btn-label">{parts.map((part, i) => <span key={i}>{part}</span>)}</span>
+}
 
 /** Pane geometry (§4.9 is about what the screen says, not how wide it is — but
  *  a brief in the middle pane and a decomposition in the right one are both
@@ -184,6 +236,10 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
   const [coverage, setCoverage] = useState<Coverage | null>(null)
   const [board, setBoard] = useState<BoardData | null>(null)
   const [wfMeta, setWfMeta] = useState<WorkflowMeta | null>(null)
+  // A failed stage move, said where the move was made. The `error` state above
+  // is the cannot-reach-the-API screen and is only rendered before `meta`
+  // arrives, so routing this through it would have failed silently.
+  const [moveError, setMoveError] = useState<string | null>(null)
   const [summary, setSummary] = useState<any | null>(null)
   const [gridData, setGridData] = useState<any | null>(null)
   const [divergent, setDivergent] = useState<any[]>([])
@@ -381,6 +437,103 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
   // Which tabs the rail actually drives. Analytics and Coverage are corpus-level
   // by construction, and a live control that changes nothing is worse than an
   // absent one — the strategist lens read the unchanged analytics as filtered.
+  /* The filter rail, the splitter and the detail pane are sticky under the top
+     bar, and they used to start at a hardcoded 58px. The bar is no longer that
+     height — and it was never really a constant: it wraps on a narrow window,
+     and its small-print line has no refresh stamp on it until the first refresh
+     lands. So it is measured. The CSS carries a default for the first paint. */
+  // A CALLBACK ref, not an effect over a ref object. The header is not in the
+  // tree on the first render — this component returns a loading state until
+  // `meta` arrives — so a mount effect ran against a null ref, returned, and
+  // never fired again, leaving every pane below aligned to the CSS fallback
+  // rather than to the bar. A callback ref runs when the node itself attaches.
+  const headerObserver = useRef<ResizeObserver | null>(null)
+  const headerRef = useCallback((el: HTMLElement | null) => {
+    headerObserver.current?.disconnect()
+    headerObserver.current = null
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const apply = () => document.documentElement.style
+      .setProperty('--topbar-h', `${Math.round(el.getBoundingClientRect().height)}px`)
+    apply()
+    headerObserver.current = new ResizeObserver(apply)
+    headerObserver.current.observe(el)
+  }, [])
+
+  /** Move a space to another stage from the board itself.
+   *
+   * The card moves before the server answers. A stage gate is used by dragging
+   * eight or nine cards in a sitting, and a board that snaps back for a
+   * round-trip after every one of them cannot be dragged at speed. The refetch
+   * behind it is what makes it true — the stage owner, the age-in-stage clock
+   * and the column counts are all computed server-side, so the optimistic card
+   * is right about where it is and stale about everything else for one tick.
+   *
+   * A rejected move is not patched up locally: the board is refetched, which
+   * puts the card back where the server says it belongs. Guessing at the undo
+   * is how two versions of "where is OS-103" end up on one screen.
+   */
+  const moveStage = useCallback(async (topicId: string, toStage: string) => {
+    setBoard((current) => {
+      if (!current) return current
+      const card = current.stages.flatMap((s) => s.topics).find((t) => t.id === topicId)
+      if (!card) return current
+      return {
+        ...current,
+        stages: current.stages.map((s) => {
+          if (s.id === toStage) return { ...s, count: s.count + 1, topics: [card, ...s.topics] }
+          if (!s.topics.some((t) => t.id === topicId)) return s
+          return { ...s, count: Math.max(0, s.count - 1), topics: s.topics.filter((t) => t.id !== topicId) }
+        }),
+      }
+    })
+    const label = wfMeta?.stages.find((s) => s.id === toStage)?.label
+      ?? wfMeta?.terminal_stages.find((s) => s.id === toStage)?.label ?? toStage
+    try {
+      const res = await fetch(`/api/topics/${topicId}/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_stage: toStage, actor: `${role}@demo`, actor_role: role }),
+      })
+      if (!res.ok) throw new Error(`${res.status}`)
+      announce(`${topicId} moved to ${label}`)
+      setMoveError(null)
+      // The move changes the topic's own workflow block, which the detail pane
+      // and the planner both read, so it is a corpus change and not a board one.
+      setRefreshKey((k) => k + 1)
+    } catch {
+      setMoveError(`${topicId} could not be moved to ${label} — it is back where it was.`)
+    } finally {
+      fetch(`/api/workflow/board?role=${role}`).then((r) => r.json()).then(setBoard).catch(() => {})
+    }
+  }, [role, wfMeta, announce])
+
+  /** Open a view tab, leaving whatever full screen is over it.
+   *
+   * Generate, the Planner and the fullscreen reader all hide `.layout` rather
+   * than unmount it, so a tab click that only set `tab` used to look pressed
+   * while the screen in front of it did not move. Every one of these is "show
+   * me this view", so every one of them closes what is covering the view. */
+  const openTab = useCallback((next: Tab) => {
+    setTab(next); setGenerating(false); setFullscreen(false); setPlanner(false)
+  }, [])
+
+  /** One view tab. A factory rather than a repeated block: the tabs are drawn
+   *  in three places in the row now — the compact-only reading pane, the boxed
+   *  Radar/List pair, and the four loose ones after it — and three copies of
+   *  the same button is three places for them to drift apart. */
+  const tabButton = useCallback((t: Tab) => {
+    const Icon = TAB_ICONS[t]
+    return (
+      <button key={t} className="topbtn"
+              aria-pressed={tab === t && !generating && !fullscreen && !planner}
+              aria-label={TAB_LABELS[t]}
+              onClick={() => openTab(t)}>
+        <Icon className="btn-icon" />
+        <TopLabel text={TAB_LABELS[t]} />
+      </button>
+    )
+  }, [tab, generating, fullscreen, planner, openTab])
+
   const filtersApply = tab === 'radar' || tab === 'list' || tab === 'whitespace'
 
   const activeFilterCount = useMemo(
@@ -470,74 +623,120 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
       {/* The target is inside the reading layout, which the generator hides —
           a skip link that lands on a hidden element is worse than none. */}
       {!generating && !fullscreen && <a className="skip-link" href="#main-pane">Skip to the topics</a>}
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" />
-          <h1>Innovation Radar</h1>
-          <span>Orange Business · opportunity spaces</span>
-        </div>
+      <header className="topbar" ref={headerRef}>
+        {/* One row of controls, one line of small print underneath it.
+            The freshness stamp and the weight-set id were sitting between the
+            tabs and the actions, and on a 2560px screen they were enough to
+            push Generate and the account onto a second row — they are things
+            the bar STATES, not things it offers, so they read below where a
+            caption belongs and the row is left to the buttons. */}
+        <div className="topbar-row">
+          <div className="brand">
+            <span className="brand-mark" />
+            <h1>Innovation Radar</h1>
+          </div>
 
-        <div className="roles" role="group" aria-label="Role mode">
           <HelpButton topic="role_modes" onOpen={setHelp} />
-          {meta.roles.map((mode) => (
-            <button key={mode.id} aria-pressed={role === mode.id}
-                    title={`${mode.description} Sees link types ${mode.link_types.join(', ')}.`}
-                    onClick={() => setRole(mode.id)}>
-              {mode.label}
+
+          {/* The three roles are one choice, so they are drawn as one control:
+              a box makes "pick exactly one of these" visible without a label
+              spending a line saying it. */}
+          <div className="btn-group roles" role="group" aria-label="Role mode">
+            {meta.roles.map((mode) => {
+              const Icon = ROLE_ICONS[mode.id] ?? IconPerson
+              return (
+                <button key={mode.id} className="topbtn" aria-pressed={role === mode.id}
+                        aria-label={mode.label}
+                        title={`${mode.description} Sees link types ${mode.link_types.join(', ')}.`}
+                        onClick={() => setRole(mode.id)}>
+                  <Icon className="btn-icon" />
+                  <TopLabel text={mode.label} />
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="tabs" role="group" aria-label="View">
+            {compact && tabButton('detail')}
+            <div className="btn-group" role="group" aria-label="The ranked set">
+              {RANKED_TABS.map(tabButton)}
+            </div>
+            {OTHER_TABS.map(tabButton)}
+          </div>
+
+          <div className="spacer" />
+
+          {/* The three that act on the portfolio rather than look at it, boxed
+              for the same reason the roles are: Generate synthesises new spaces
+              into it, Workflow moves them through its gate, Planner commits a
+              set of them to years. Workflow is still a TAB — it renders in the
+              reading layout like the others — but it is read here, because what
+              a stage owner does on that board is the same kind of act. */}
+          <div className="btn-group actions" role="group" aria-label="Portfolio">
+            <button className="topbtn generate-btn"
+                    onClick={() => { setGenerating(true); setFullscreen(false); setPlanner(false) }}
+                    aria-pressed={generating} aria-label="Generate"
+                    title="Synthesise more opportunity spaces from the evidence already collected">
+              <IconSpark className="btn-icon" />
+              <TopLabel text="Generate" />
             </button>
-          ))}
+            <button className="topbtn workflow-btn"
+                    onClick={() => openTab('workflow')}
+                    aria-pressed={tab === 'workflow' && !generating && !fullscreen && !planner}
+                    aria-label="Workflow"
+                    title="The stage gate: drag a space from one stage to the next, or park it">
+              <IconBoard className="btn-icon" />
+              <TopLabel text="Workflow" />
+            </button>
+            <button className="topbtn planner-btn"
+                    onClick={() => { setPlanner(true); setGenerating(false); setFullscreen(false) }}
+                    aria-pressed={planner} aria-label="Planner"
+                    title="Build a five-year portfolio plan: which spaces to enter, in what order, and what they earn">
+              <IconCalendar className="btn-icon" />
+              <TopLabel text="Planner" />
+            </button>
+          </div>
+
+          <button className="topbtn icon-only"
+                  onClick={() => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'auto' : 'dark')}
+                  aria-label={`Theme: ${theme}`}
+                  title={`Theme: ${theme} — click to change`}>
+            {theme === 'auto' ? <IconAutoTheme className="btn-icon" />
+              : theme === 'dark' ? <IconMoon className="btn-icon" />
+              : <IconSun className="btn-icon" />}
+          </button>
+
+          {/* Two controls rather than a menu. A dropdown here would need
+              outside-click handling, focus return and an escape key for two
+              items, and one of those two is the one people look for when they are
+              already annoyed. Sign out keeps the door and drops the word: it is
+              the one control in the row whose icon nobody has to learn. */}
+          <button className="topbtn account-btn" onClick={() => setChangingPassword(true)}
+                  aria-label={`Signed in as ${user.username} — change password`}
+                  title={`Signed in as ${user.username} — change password`}>
+            <IconPerson className="btn-icon" />
+            <span className="btn-label"><span>{user.display_name}</span></span>
+            {user.must_change_password && <span className="account-warn" aria-hidden>!</span>}
+          </button>
+          <button className="topbtn icon-only signout-btn" onClick={onSignedOut}
+                  aria-label="Sign out" title="Sign out — end this session">
+            <IconSignOut className="btn-icon" />
+          </button>
         </div>
 
-        <div className="tabs" role="group" aria-label="View">
-          {([...(compact ? ['detail' as Tab] : []), 'radar', 'list', 'brief', 'workflow',
-             'analytics', 'whitespace', 'coverage'] as Tab[]).map((t) => (
-            <button key={t} aria-pressed={tab === t && !generating && !fullscreen}
-                    onClick={() => { setTab(t); setGenerating(false); setFullscreen(false) }}>
-              {t === 'whitespace' ? 'White space' : t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
+        <div className="topbar-info">
+          <span className="ti-sub">Orange Business · opportunity spaces</span>
+          <span className="spacer" />
+          {view?.last_refresh && (
+            <span className="meta-chip" title="AC-02 freshness: the radar shows its last refresh date">
+              refreshed {(view.last_refresh.finished_at ?? view.last_refresh.started_at).slice(0, 10)}
+            </span>
+          )}
+          <button className="meta-chip" title="SC-10: every published score records its weight set"
+                  onClick={() => setHelp('weight_set')}>
+            {meta.weight_set}
+          </button>
         </div>
-
-        <div className="spacer" />
-
-        {view?.last_refresh && (
-          <span className="meta-chip" title="AC-02 freshness: the radar shows its last refresh date">
-            refreshed {(view.last_refresh.finished_at ?? view.last_refresh.started_at).slice(0, 10)}
-          </span>
-        )}
-        <button className="meta-chip" title="SC-10: every published score records its weight set"
-                onClick={() => setHelp('weight_set')}>
-          {meta.weight_set}
-        </button>
-        <button className="planner-btn"
-                onClick={() => { setPlanner(true); setGenerating(false); setFullscreen(false) }}
-                aria-pressed={planner}
-                title="Build a five-year portfolio plan: which spaces to enter, in what order, and what they earn">
-          Planner
-        </button>
-        <button className="generate-btn"
-                onClick={() => { setGenerating(true); setFullscreen(false); setPlanner(false) }}
-                aria-pressed={generating}
-                title="Synthesise more opportunity spaces from the evidence already collected">
-          Generate
-        </button>
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'auto' : 'dark')}
-                title="Theme">
-          {theme === 'auto' ? '◐' : theme === 'dark' ? '☾' : '☀'}
-        </button>
-
-        {/* Two controls rather than a menu. A dropdown here would need
-            outside-click handling, focus return and an escape key for two
-            items, and one of those two is the one people look for when they are
-            already annoyed. */}
-        <button className="meta-chip account-chip" onClick={() => setChangingPassword(true)}
-                title={`Signed in as ${user.username} — change password`}>
-          {user.display_name}
-          {user.must_change_password && <span className="account-warn" aria-hidden>!</span>}
-        </button>
-        <button className="signout-btn" onClick={onSignedOut} title="End this session">
-          Sign out
-        </button>
       </header>
 
       {user.must_change_password && (
@@ -908,9 +1107,19 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                 </span>
               </div>
               <div className="panel-body">
-                <Board board={board} selectedId={selected} onSelect={setSelected} onExplain={openExplain} />
+                {moveError && (
+                  <div className="board-error" role="alert">
+                    <span aria-hidden>⚠</span>
+                    <span>{moveError}</span>
+                    <button onClick={() => setMoveError(null)} aria-label="Dismiss">Dismiss</button>
+                  </div>
+                )}
+                <Board board={board} selectedId={selected} onSelect={setSelected}
+                       onExplain={openExplain} onMove={moveStage} />
                 <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 14, marginBottom: 0 }}>
-                  Open a space to assess it. Each role rates only its own axis — strategy rates
+                  <b>Drag a card into another column to move it a stage</b>, or focus one and
+                  press Alt + ← / →. Every move is recorded against your role, with the stage it
+                  came from. Open a space to assess it. Each role rates only its own axis — strategy rates
                   strategic fit, sales rates customer demand, presales rates deliverability. Those
                   ratings form a third quantity, <b>conviction</b>, which changes what surfaces first
                   for each role but never alters attractiveness or right to win.

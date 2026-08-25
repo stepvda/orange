@@ -6,6 +6,410 @@ features that exposed them.
 
 ---
 
+## The documentation set catches up with the product
+
+**Changed.** Four features had shipped without reaching the design documents at
+all: the Planner, pre-sales collateral, the scoping conversation and sign-in.
+The Functional Design Document and the Technical Architecture had **zero**
+mentions of any of them, and the Technical Architecture still opened its security
+section with a callout headed *"the deployed demonstration is public and
+unauthenticated"* — which had stopped being true.
+
+* **Six new figures**, drawn to the same 0..100 canvas convention as the other
+  twenty-three. Functional: the Planner's two sources over one arithmetic;
+  twelve pre-sales pieces from one snapshot; the two routes into a new space and
+  the gate they share. Technical: the mixed-integer program and its fallback;
+  the collateral build path; access control beside the deletion cascade.
+* **The FDD gains four sections** — creating a space on demand (10b), the
+  Planner (11b), pre-sales collateral (12b), and signing in and deletion (13.5,
+  13.6) — plus six rows in the conceptual data model.
+* **The Technical Architecture gains two** — the Planner's optimiser (9c) and
+  the collateral renderer (9d) — and its security section is rewritten around
+  what `auth.py` actually does, including the three things that are still
+  absent: per-role authorisation, rate limiting on the endpoints that spend
+  model budget, and an audit log.
+* **`build_reference.py` learned to carry prose.** A page of hand-written
+  material about the pre-sales endpoints had been pasted into `API.md` after
+  generation, and the next regeneration silently deleted it. Route-group notes
+  now live in the generator, where they survive.
+* **Nine decisions recorded** (D-14 to D-22), each with the thing it costs:
+  why selection is an optimiser rather than a model, why a committed set is
+  scheduled rather than re-selected, why SOM is discounted before it is summed,
+  why a collateral piece with missing inputs still builds, why the format is the
+  reader's choice, why the corpus enables the Generate button, why the gate
+  judges a sentence rather than a label, why a session lives in the database,
+  and why a delete names the plans it breaks instead of refusing.
+* **The runbook gains the four things it could not tell you**: how to build a
+  plan from either source and what its two failure messages mean, how collateral
+  is built and why there is no CLI command for it, how to manage accounts, and
+  how to delete a space.
+
+---
+
+## Two decks, two films, and a demo that scrolls
+
+**Added.** `Orange_Innovation_Radar_Walkthrough.pptx` and
+`Orange_Innovation_Radar_Demo.mp4` — a deck and a narrated film that show how to
+USE the product, in seven chapters, against the running instance. The existing
+deck and film argue why it is built the way it is, which is a different talk for
+a different room.
+
+* **The chapter cards are the deck's own slides, rendered.** The film does not
+  redraw them, so the two cannot drift.
+* **The browser is headed, not headless.** Three of the seven chapters are
+  largely a PDF on the page — the sales brief, a built pre-sales piece, the plan
+  document — and headless Chromium draws a grey rectangle in place of all three.
+* **It scrolls.** Every long pane is scrolled through rather than shown from the
+  top: the detail pane, the score breakdown, the twelve pre-sales pieces, the
+  analytics charts, the plan. A frame of the first thousand pixels of a screen
+  is not a demonstration of that screen.
+* **One browser context per chapter**, because Playwright finalises a recording
+  when its context closes — which is what makes it possible to cut a chapter
+  card in between. The signed-in session is carried across the seven as saved
+  storage state rather than by signing in seven times on camera.
+* **`build_shots.py` captures the screenshots both decks use**, from the real
+  application at 1920x1080. A deck that illustrates a screen with a drawing of
+  that screen is a deck that drifts.
+* The main deck gains six slides and its figures are re-read from the database;
+  the speaker notes are renumbered to match, and now say which pages to cut
+  first when the room is a sales audience rather than a strategy one.
+
+---
+
+## The Planner will plan the business you have already committed to
+
+**Added.** A second source for a plan. The Planner asked for parameters and
+chose a portfolio under them; it now also takes the portfolio as given —
+*Workflow selected* builds the plan from every opportunity space the
+collaboration board has moved to **Demand-tested or beyond**, and computes the
+rest.
+
+* **The stage gate outranks every constraint, and none of them is applied.** A
+  space at Demand-tested has a salesperson's judgement behind it. Dropping it
+  for resting on a modelled size, or for sitting one level too far out on
+  portfolio distance, answers a decision with an assumption band. So under this
+  source there is no evidence floor, no distance cap, no concentration limit and
+  no objective — because there is nothing to optimise. `selected_count` equals
+  `considered_count`, and a test asserts it.
+* **Horizon spreads the set across time.** Each space enters when its horizon
+  says the market arrives — `now` may start in year one, `later` not before year
+  three — and a cohort larger than a year's entry slots cascades into the next
+  year rather than pretending the capacity exists. Within a cohort the earlier
+  slots go to the largest commitments, so an over-subscribed year defers the
+  smallest rather than an arbitrary set.
+* **A Live space starts in year one whatever its horizon says.** The horizon
+  describes when the market arrives, which is a question already answered for
+  something that is already selling. Scheduling it into year three would be
+  projecting a start date for something that has started. The stage pulls entry
+  forward; it never pushes it back.
+* **Over-commitment is the finding, not a reason to edit the portfolio.** Under
+  the optimiser a capability pool cannot be over-committed — it would not have
+  selected past one. Here the business already has, so nothing is dropped to
+  make the numbers work: the pool that peaks above its available share is
+  flagged with the size of the gap, and the plan names what closes it — hiring,
+  partnering, raising the share available for new work, or moving a space back
+  down the gate.
+* **A committed space with no market size is declared rather than dropped.** It
+  is in the plan as far as the business is concerned and absent from every
+  figure on the page. Left silent it understates a portfolio the reader believes
+  is complete, so it is listed by id, flagged, and the totals are described as a
+  floor.
+* **What is *not* in the plan says whose decision that was.** The exclusions
+  list under this source names a stage rather than a constraint: still at
+  Shortlisted, stopped on the board, or unsized. Nothing there was excluded by
+  the Planner, and the document says so.
+* **The prose knows which question it is answering.** A narrative written for a
+  committed set may not describe alternatives being weighed, because none were.
+  The system prompt splits on the source (`plan-v2`), the evidence block states
+  where the set came from, and the exported PDF opens with *this plan did not
+  select anything* — before the first figure, because everything below it reads
+  differently once the reader knows that.
+* **Two sources, two plans.** The source is part of the plan's fingerprint, so a
+  committed plan can never quietly overwrite the parameter plan it was built to
+  be compared against.
+* **Failure speaks in the terms of the mode that was used.** An empty board
+  sends the reader to the workflow board and says how many spaces are waiting a
+  stage earlier. Telling them to loosen a confidence floor would send them to a
+  control that is not on their screen.
+
+Reachable from the Planner sidebar, from `POST /api/planner/plans` with
+`source: "workflow"`, and from `radar plan --source workflow --from-stage
+demand_tested`.
+
+---
+
+## Pre-sales collateral: twelve documents per space, in the format you work in
+
+**Added.** A fourth tab on the full-screen view of an opportunity space. The
+brief is one document for one conversation; this is what the team needs between
+that conversation and a proposal — a discovery and qualification pack, an
+outreach sequence, a first-meeting deck, a value hypothesis, a reference pack,
+competitor battlecards, a solution outline, a PoC scoping sheet, a partner
+brief, commercial model options, tender response blocks and a bid risk register.
+
+* **One snapshot, twelve documents.** `presales.context.load` reads the space
+  once and every renderer works from that. Two documents in the same pack
+  quoting different SAM figures — because one was built before a sizing run and
+  one after — is the failure this makes impossible rather than unlikely.
+* **The format is the reader's choice, per piece.** Documents emit as PDF, Word
+  or OpenDocument; decks as PowerPoint, OpenDocument or PDF. The default is the
+  format the artefact wants to be: a battlecard is a PDF because it is read on a
+  phone and must not have been edited since it was approved; tender blocks are
+  Word because a PDF of paste-fodder is obstructive. Formats coexist — asking
+  for Word after you have the PDF gives you both, because that is obviously what
+  was meant. A deck is never offered as Word: one idea per page is the only
+  property that made it a deck.
+* **A document is described once and emitted many times.** Seven documents by
+  three formats plus four decks by three is thirty-three places for the same
+  battlecard to say something slightly different, and within a month two of them
+  disagree. So `documents.py` and `decks.py` describe blocks, and `emitters.py`
+  puts a block on a page. Adding a format is one emitter.
+* **Charts are vector where it matters.** Eleven chart types drawn with exact
+  geometry: a TAM/SAM/SOM funnel, a value waterfall, a payback curve, a
+  competitive field map, a risk matrix, a buying-centre map, a component
+  ownership map, a portfolio path, a phase timeline, a scope boundary and
+  coverage bars. In PowerPoint they are NATIVE SHAPES, so an architect moves a
+  box rather than redrawing the slide; in PDF they are reportlab geometry. Word
+  and ODF get the same picture rasterised, because neither has a drawing model
+  this code can target — the trade is deliberate and the right way round, since
+  the formats people send and edit both get true vector output.
+* **The palette was validated, not chosen.** Each colour does exactly one job —
+  identity, order, magnitude, polarity or state — and the ordinal and
+  categorical sets were run through a contrast and colour-vision check rather
+  than eyeballed. The brand rule the brief established is kept: orange means
+  Orange, or it means emphasis. It is never slot four of a competitor palette,
+  which is why the field map names competitors instead of colouring them.
+* **It looks at the public record before writing.** The corpus is refreshed on a
+  cadence and a battlecard is written the morning of a meeting; a regulator's
+  deadline or a competitor's announcement lives in that gap. `research.py` runs
+  targeted queries through the connectors the pipeline already trusts — same
+  `HttpSession`, same throttling, same robots discipline, content by reference
+  only (DR-08). Anything drawn from a retrieved item must name its publisher
+  inline, and every item the writer saw is listed at the back so the citation
+  can be followed. Those items have not been through the radar's evidence
+  validation and the document says so.
+* **Stricter about numbers than the pipeline is, on purpose.** `_NUMERIC_CLAIM_RE`
+  lets bare counts through, because inside the pipeline a number is about to
+  meet the entailment check. Nothing here meets one — it goes to a customer. So
+  "1,200 plants in scope" is stripped too: it is a claim about the customer's
+  own estate, it reads as researched, and it is invented.
+* **A piece whose inputs are missing still builds**, with a banner naming the
+  gap. An outline saying "built without the written description" is more use
+  than an error: it still carries the component map and the portfolio path.
+
+**Fixed.** Every generated `.pptx` opened with PowerPoint's *"needs repair"*
+dialog. Killing the theme's drop shadow by removing `<a:effectRef>` from
+`<p:style>` breaks `CT_ShapeStyle`, which requires all four of `lnRef`,
+`fillRef`, `effectRef` and `fontRef` in that order. The reference now points at
+`idx="0"` — the schema's own way of saying "no effect" — so the element stays
+and the shadow still goes. A file users have to click through a repair prompt
+to open is worse than a drop shadow, and nothing in a rendered slide shows it:
+the test asserts on the XML.
+
+**Fixed.** Slide bullets printed on top of each other. They were advanced by a
+fixed 0.5in step, which assumes one line each; the prompts ask for twelve-word
+bullets and the model routinely returns paragraphs, so four bullets wrapping to
+three lines apiece overprinted into an unreadable block that still looked like a
+slide. Bullets are now measured and advanced by their real height, and the type
+steps down when the block would not otherwise fit. The regression test asserts
+on the space RESERVED against the text in it — a box-overlap test passes
+trivially while the bug is present, because the boxes stay one line tall and it
+is the text that spills out of them.
+
+**Fixed.** Diagrams ran off the bottom of the slide. Layer bands and component
+boxes used constant heights chosen for a slide with nothing above them; a
+five-layer solution diagram ran an inch past the edge, losing the physical
+layer — the row describing the customer's own estate. Bands and boxes are now
+sized to the space actually left, every chart clamps its height to the room
+below it, and the legend is dropped rather than the last layer.
+
+**Fixed.** `ThreadPoolExecutor.map(timeout=)` bounds only the iteration — the
+executor's `__exit__` then joins every outstanding thread, so a nominal
+25-second research budget took 58 real seconds against a throttled source.
+Futures, an explicit deadline and `shutdown(wait=False, cancel_futures=True)`
+is what actually bounds it.
+
+**Fixed.** `reportlab` was declared only in `requirements-azure.txt`, so a fresh
+local install could not build a brief at all.
+
+**Note.** `topic_collateral` is keyed on (space, kind, format). A database that
+saw the intermediate single-format schema is rebuilt on startup — the table
+holds only pointers to derived files, every row is reproducible by pressing
+Generate, and left in place every request 500s on the missing column. The
+generated files are left on disk.
+
+
+## A sign-in in front of the whole app
+
+**Changed.** Every `/api` path now requires a session. Until this, the deployed
+radar answered every request it received: competitive analysis of named
+companies, Orange's own asset graph, market estimates with the workings
+attached, brief PDFs stamped *Internal*, and the stage-gate opinions of people
+who work here — served to whoever found the hostname. The README named this as
+the thing to fix before the app went anywhere real. This is that fix.
+
+* **One account exists on a fresh database: `orange` / `orange`.** It is created
+  only when the user table is EMPTY, which is the difference between a
+  convenience and a back door — an operator who deletes it and creates their own
+  must not find it resurrected by the next restart. It is flagged
+  `must_change_password`, and the interface carries a banner on every screen and
+  a mark beside the account name until that flag clears. A default credential
+  nobody is reminded about is a permanent one.
+* **The guard is an application-level dependency, not a decorator per route.**
+  The failure mode of a per-route guard is the route somebody forgot, so there
+  is no route-level opt-in to forget: a handler added next month inherits it.
+  The test walks the router rather than naming endpoints, for the same reason.
+  Being a dependency rather than middleware also puts it inside FastAPI's
+  exception handling and inside CORS, so a refusal is an ordinary `detail` the
+  frontend already knows how to read.
+* **Nothing replayable is stored.** Passwords are PBKDF2-HMAC-SHA256 verifiers
+  at OWASP's current iteration count, salted per password, with the count
+  stamped into the hash so raising it re-hashes each password on its next
+  sign-in rather than forcing a reset. The session cookie is stored only as its
+  SHA-256. A copy of the database file is therefore neither a set of passwords
+  nor a set of live logins — which matters disproportionately here, where the
+  database *is* a file on an SMB share.
+* **The refusal says nothing.** An unknown account and a wrong password produce
+  the same message, and an unknown account still pays for a hash so a miss costs
+  the same as a hit. Identical wording with a 5 ms answer for "no such user" is
+  an enumeration oracle wearing a disguise.
+* **Sessions in the table, not signed and stateless.** A JWT cannot be revoked
+  without server state, which puts the state back anyway — and the thing an
+  operator actually wants ("sign that account out everywhere, now") is one
+  `DELETE` here and impossible there. Expiry is rolling with an absolute
+  ceiling, and checked on read, so a session stops working the moment it expires
+  rather than the next time somebody else signs in.
+* **Five failed sign-ins close an account for five minutes**, including against
+  the right password — a throttle that steps aside for a correct guess is not a
+  throttle.
+* **Accounts are managed from the command line**, `radar user add|passwd|list|
+  remove|signout`. The web interface can change its own password and nothing
+  else: handing the running app the power to mint logins would turn a session
+  hijack into a permanent one. Changing a password ends every other session for
+  the account and reissues the one that did it.
+* **The bundle and `/healthz` stay open.** The login screen is part of the
+  bundle, so a guard in front of it locks the door from the inside; and a
+  liveness probe answering `401` makes every deployment look unhealthy, which on
+  this plan means restarts until the quota runs out.
+
+**Defect found while building it.** `:root[data-theme="dark"]` never carried the
+`--status-*` group, so a reader who chose dark on a light-preference machine got
+the *light* danger colour — `#b3261e` on `#1a1a19`, 2.6:1 — for the evidence-gap
+badge and the warning box. Adding a delete button to the same token is what made
+it worth finding. The group is now declared in both dark blocks, and text on a
+danger fill uses a new `--status-serious-ink` that flips with it: the dark
+palette lightens the fill to `#ff9c78`, and white on that is 2.1:1.
+
+---
+
+## Deleting an opportunity space
+
+**Added.** A space can be removed, from the bottom of the detail pane and from
+`radar delete-space`. It could not be before — the only way to retract a
+synthesis result was to edit the database by hand, which meant nobody did, and
+spaces that were wrong stayed on the radar being counted.
+
+The `DELETE` was never the hard part; thirteen tables point at a space and the
+foreign keys already cascade. What needed deciding was what a delete is allowed
+to take with it, and how much of that a person is told before they agree to it.
+
+* **The dialog reads the consequence out first.** It asks the server what would
+  go — 51 evidence attachments, 11 asset links, 6 stored scores, an assessment, a
+  stage-gate position, two market estimates, the description, the competitive
+  read, the brief — and shows the list before it shows the button. "Are you
+  sure?" over a number nobody was shown is not a confirmation. The id has to be
+  typed to enable the button: this control sits near "Regenerate description",
+  both are one click, and only one of them is irreversible.
+* **The signals stay, and the dialog says so as loudly as it says the rest.**
+  Only the attachment rows go. A signal is a reading of the world that several
+  spaces may cite, kept for replay under DR-14, and a reader who believes 47
+  sources are about to be destroyed will not press the button — and would be
+  right not to.
+* **Duplicates folded into the space go with it.** A row with `merged_into` set
+  says "this triple is the same topic as that one". Clearing the pointer instead
+  would resurrect duplicates against the identity rule, and `idx_os_triple`
+  would refuse them anyway.
+* **A space inside a portfolio plan is reported, not refused.** `plan_selections`
+  cascades, so the plan loses a row while its stored projection and space count —
+  computed once and immutable by design — still include it. Refusing would make
+  any space that ever entered a plan permanent; silently breaking the plan would
+  be worse. So the dialog names the plans, before and after.
+* **Deleting is not suppression, and the dialog says that too.** Identity is the
+  vertical × use case × technology triple (DR-03), so a later refresh that meets
+  the same triple in the evidence will synthesise the space again, with a new id
+  and none of the history removed. Removing a space is a statement about the
+  corpus as it stands, not a permanent veto.
+
+---
+
+## A scoping assistant on the Generate screen
+
+**Changed.** The free-text box at the bottom of the Generate screen ("Or
+describe one opportunity space") is now a conversation, selected from a tab
+beside the grid form. The box asked for one thing and gave one piece of
+feedback — a character count, which is the only failure that did not matter. An
+opportunity space is a vertical × use case × technology plus a buyer's problem
+and a place, and somebody who knows their market but not the taxonomy
+under-specified two of those every time. They found out minutes later, from a
+run that created nothing.
+
+* **The assistant reads the corpus while you talk.** Every turn re-retrieves
+  from the whole transcript against the same signal vectors the run will read,
+  at the same similarity floor, and what came back is shown beside the
+  conversation with publisher, date and cosine. It is also given the
+  theme-cluster map, the geography and signal-type distribution, and the
+  taxonomy cells already occupied — so it asks about the geography the evidence
+  is actually in rather than asking which geography.
+* **It interviews in a fixed order.** The three slots that *are* the space
+  first, then the buyer's problem, geography, buyer and deal shape — ranked by
+  how much each changes retrieval. The questions are configuration
+  (`prompts.SCOPING_SLOTS`), reviewable as a set the way the vocabularies are.
+* **The button is enabled by the corpus, not by the model.** Every brief the
+  assistant proposes is put back through the retrieval the job will perform. One
+  that returns nothing above the floor is shown with the reason and cannot be
+  selected. Asked whether it has enough, a model says yes; where the two
+  disagree the screen says so.
+* **Similarity is not support.** Retrieval clearing the floor only means the
+  corpus contains text that READS like the brief. A brief for municipal digital
+  signage retrieved French public-sector IT tenders at 0.64 cosine — the same
+  closest score as a well-evidenced brief about turbine gearboxes — and
+  synthesis then produced two candidates whose every claim the critic correctly
+  rejected, for citing tenders that were about employment services. So a brief
+  must also be SUPPORTED: at least three retrieved signals about its use case or
+  its technology, not merely its sector. The test is the one
+  `config/settings.yaml` already prescribes for enrichment
+  (`require_taxonomy_corroboration`), reused rather than reinvented, with the
+  vertical deliberately excluded — it is the axis that corroborates every brief
+  ever written about a well-covered sector.
+* **Two stages, cheapest first.** The vocabulary test is free and precise but
+  has poor recall: a report on a utility's compromised RTUs is unmistakably
+  about threat detection for energy operators and will never contain the string
+  "SIEM and SOAR". Where it comes up short, one cheap model call is spent on the
+  same retrieved documents — the same trade §4.4.4 makes for the entailment
+  check. A provider failure keeps the vocabulary answer rather than turning
+  every brief into a refusal.
+* **Neither the assistant's own hedge nor the user's "yes" is permission.** If
+  the assistant writes "the evidence is thin", it must set `ready` false and
+  propose nothing; saying it is thin and proposing it anyway reads as a warning
+  and behaves as a recommendation. It may not resolve thin evidence by asking
+  "shall I proceed?" — the person cannot see the corpus and it can.
+* **Closed vocabularies, in both directions.** What someone says is resolved
+  through the vocabulary's own synonyms — "banking" becomes
+  `financial_services` — and what cannot be resolved is dropped and named rather
+  than carried through to fail validation three stages later.
+* **DR-03 is said before the run.** A brief landing on an occupied triple names
+  the space it would refresh, while there is still a choice about it.
+* **One conversation can produce several spaces.** Distinct triples become
+  distinct briefs and distinct synthesis passes inside a single run
+  (`POST /api/generate/briefs`), because synthesis holds the only write lock on
+  that identity. The briefs are editable before they run, and the run re-checks
+  whatever is actually submitted.
+* Stateless: the transcript lives in the browser and is posted whole each turn.
+  No session table, nothing to expire. The opening turn is written rather than
+  generated, so it costs no model call.
+
+---
+
 ## The Planner
 
 **Added.** A portfolio planner: stated constraints in, a selected set of

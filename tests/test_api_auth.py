@@ -87,7 +87,8 @@ def sign_in(client, username="orange", password="orange"):
 #: Path parameters need *a* value to route on. It never has to exist — the guard
 #: runs before the handler, so a 401 is proof the handler was never reached.
 PLACEHOLDERS = {"topic_id": "OS001", "plan_id": "PLAN-1", "job_id": "JOB-1",
-                "competitor_id": "c1", "node_id": "offer:x", "full_path": "index.html"}
+                "competitor_id": "c1", "node_id": "offer:x", "full_path": "index.html",
+                "kind": "battlecards"}
 
 
 def api_routes(app):

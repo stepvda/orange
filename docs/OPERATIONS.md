@@ -84,6 +84,107 @@ radar brief --all
 
 ---
 
+## Planning
+
+The Planner is not a pipeline stage. It reads what the pipeline produced and
+answers a different question: not which topic, but which **set**.
+
+```bash
+# Parameters — the optimiser chooses, under constraints you state
+radar plan --budget 40 --slots 6 --min-confidence partial --max-distance 2 \
+           --objective profit --narrate --pdf
+
+# The committed set — the stage gate already chose; this only schedules and costs it
+radar plan --source workflow --from-stage demand_tested --narrate --pdf
+
+radar plans                       # stored plans with their headline figures
+```
+
+`--narrate` and `--pdf` are separate flags because only the first spends a model
+call. The projection itself is arithmetic and is complete the moment the plan is
+created.
+
+**A plan id is a fingerprint of its inputs** plus `economics_version`,
+`sizing_version`, `weight_set` and the plan schema. Running the same command
+twice returns the same plan rather than a second copy of it, and a parameter plan
+can never quietly overwrite the workflow plan it was built to be compared
+against.
+
+> **Two failure messages, and they mean different things.** *"No opportunity
+> space survived the stated constraints"* means loosen something — the confidence
+> floor, the distance cap, the exclusions. *"No opportunity space has reached
+> Demand-tested"* means the workflow board is empty, and no constraint you can
+> reach from the command line will change that; move a card forward, or plan from
+> parameters instead.
+
+Changing any band in `config/economics.yaml` requires a new `economics_version`.
+Projections across a version boundary are not comparable, and every plan records
+the version that produced it.
+
+---
+
+## Pre-sales collateral
+
+Twelve artefacts per space. There is **no CLI command** — collateral is built
+through the API, from the fourth tab of a space's full-screen view, because every
+piece is bound to a snapshot of the space and the format is a choice the reader
+makes at the moment of asking. A batch that pre-built all twelve in all their
+formats would produce sixty files, most of them stale before anyone opened one.
+
+```bash
+# What exists for a space, built or not, with staleness per format
+curl -b cookies.txt localhost:8000/api/topics/OS021/presales
+
+# Build one piece; ?fmt= picks the format, ?force=true rebuilds a current one
+curl -b cookies.txt -X POST 'localhost:8000/api/topics/OS021/presales/battlecards?fmt=docx'
+```
+
+Formats coexist — asking for Word after you have the PDF gives you both. An
+unsupported format is a `400` naming the alternatives, never a silent fallback.
+
+Set `RADAR_PRESALES_RESEARCH=0` to disable the live research pass. Needed for CI,
+for air-gapped builds, and for any deployment where outbound calls are the thing
+being prevented.
+
+---
+
+## Accounts
+
+```bash
+radar user list                  # who exists, who is still on the shipped password
+radar user add jo                # prompts twice
+radar user passwd orange         # also ends every session that account holds
+radar user signout jo            # end that account's sessions, keep the account
+radar user remove jo
+```
+
+An empty database seeds `orange` / `orange`, flagged **must change password**;
+the interface warns on every screen until it is cleared. Accounts cannot be
+created from the running application — this is the only route in, so a hijacked
+session cannot mint itself a permanent login.
+
+---
+
+## Removing an opportunity space
+
+```bash
+radar delete-space OS123          # prints the impact, then asks
+radar delete-space OS123 --yes    # skips the prompt
+```
+
+The same impact report the interface reads out before showing its button.
+**Signals survive** — only the attachment rows go, because a signal is evidence
+several spaces may cite. **Duplicates folded into this space go with it.** **A
+plan that selected the space is named, not blocked** — its stored projection was
+computed once and is immutable by design.
+
+> **Deletion is not suppression.** Identity is the vertical × use case ×
+> technology triple, so a later refresh that meets the same triple in the
+> evidence will synthesise the space again, with a new id. Removing a space is a
+> statement about the corpus as it stands, not a permanent veto.
+
+---
+
 ## Serving
 
 ```bash
@@ -97,6 +198,26 @@ For production the API also serves the built bundle from the same origin:
 npm --prefix frontend run build
 radar serve --host 0.0.0.0 --port 8000
 ```
+
+**Signing in.** Every `/api` path needs a session except the three under
+`/api/auth`. The first start of an empty database seeds `orange` / `orange`. From
+a script:
+
+```bash
+curl -c cookies.txt -X POST localhost:8000/api/auth/login \
+     -H 'Content-Type: application/json' \
+     -d '{"username":"orange","password":"orange"}'
+curl -b cookies.txt localhost:8000/api/meta          # now answers 200
+```
+
+`/healthz` and the built bundle stay open deliberately: the login screen has to
+load before anyone can sign in, and a liveness probe that answers `401` makes
+every deployment look unhealthy.
+
+> **A `401` from `/api/auth/login` is deliberately ambiguous.** An unknown
+> account and a wrong password give the same message and cost the same time, so
+> the response cannot be used to enumerate accounts. Repeated failures on one
+> account rate-limit to `429` and reopen by themselves.
 
 > **The failure you will hit at least once.** `radar serve` does not reload. If
 > you add an endpoint and the frontend calls it, the running server answers
@@ -197,6 +318,39 @@ overtaken. Only a rebuild fixes incomplete:
 radar brief OS012          # or the Regenerate button in the Brief tab
 ```
 
+### A plan will not build
+
+Read which message it is. *"No opportunity space survived the stated
+constraints"* is a parameter problem — loosen the confidence floor, the distance
+cap or the exclusions. *"No opportunity space has reached Demand-tested"* is a
+workflow problem, and nothing on the command line fixes it. *"N spaces have
+reached Demand-tested but none has a bottom-up market size"* means run `radar
+size` first: the plan is arithmetic over those sizes, and there is nothing to do
+arithmetic on.
+
+If a plan builds but the capability figures look impossible, check
+`pool_availability` — it is the share of headcount free for **new** work, and the
+default is deliberately conservative.
+
+### A pre-sales piece built with a banner across the top
+
+That is the design, not a failure. A piece whose declared inputs are missing
+still builds, with the gap named — an engineer who asked for a solution outline
+and got an error has nothing, while one who got the outline marked *"built
+without the written description"* has the component map, the portfolio path and a
+clear instruction. Generate the missing input (`radar describe`, `radar size`,
+`radar competition`) and rebuild with `?force=true`.
+
+### Everything answers 401
+
+The session expired, or the cookie was not sent. Sessions refresh on use up to
+the idle window and cannot outlive the ceiling however often they are used. If
+sign-in appears to succeed and the next request still answers `401`, the cookie
+is being discarded — check `RADAR_COOKIE_SECURE`. Marking the cookie `Secure`
+over plain HTTP means the browser drops it and nobody can sign in; unset, it
+follows the scheme the browser used, reading `x-forwarded-proto` first because
+App Service terminates TLS at the front end.
+
 ### Scores look wrong after a config change
 
 Changing any weight requires a **new `weight_set` id**. Scores across a version
@@ -213,11 +367,31 @@ python3 docs/build_diagrams.py
 
 # API and data-model references, generated from the running code
 python3 docs/build_reference.py
+
+# the two design documents, which embed the diagrams
+python3 docs/build_docs.py
+
+# the screenshots both decks put on their slides — needs the app running
+python3 docs/build_shots.py
+
+# the decks
+python3 docs/build_deck.py                 # Orange_Innovation_Radar.pptx
+python3 docs/build_walkthrough_deck.py     # ..._Walkthrough.pptx
+
+# the narrated films — these need the app running on :8000 and :5173
+python3 docs/build_video.py                # the concept film
+python3 docs/build_demo.py                 # the narrated product demo
 ```
 
-Both are regenerated from the code and the live schema, so they cannot drift.
-The FDD and Technical Architecture `.docx` files are built by
-`docs/build_docs.py`, which embeds the diagrams.
+The references are regenerated from the code and the live schema, so they cannot
+drift. The narrative documents are hand-written in `docs/_build/*_content.py` and
+need judgement to update — `build_docs.py` only assembles them.
+
+**The two film builds drive a real browser against the running application.**
+Nothing in either is mocked, and the demo runs the browser **headed** rather than
+headless — a headless Chromium will not display an embedded PDF, and half of what
+the demo shows is a document rendered on the page. Do not "fix" that back to
+headless.
 
 ---
 

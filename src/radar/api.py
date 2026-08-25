@@ -4,37 +4,51 @@ FR-27: "Expose a read API so that topic data can be consumed by other Orange
 tools." It is priority C in the requirements, but the React frontend needs it,
 so it is built now and serves both.
 
-The API is READ-ONLY except for the two write paths the requirements demand:
-feedback capture (FR-23, FR-34, DR-15) and curator link confirmation (LK-06).
-Nothing here mutates a score or a topic — that is the pipeline's job, and
-keeping the boundary sharp is what makes SC-11 reproducibility checkable.
+Reads never write. Scores and topic content are still the pipeline's job, and
+keeping that boundary sharp is what makes SC-11 reproducibility checkable — but
+the write paths have grown past the two the requirements named (feedback capture
+under FR-23/FR-34/DR-15, curator link confirmation under LK-06) to include the
+derived artefacts a curator asks for by pressing a button, generation runs, and
+removing a space outright.
+
+Every `/api` path here requires a session (`radar.auth`). The bundle and the app
+shell do not: the login screen has to load before anyone can sign in, and there
+is nothing in a JavaScript file worth protecting. `/docs` and `/openapi.json` are
+FastAPI's own routes rather than this router's, so they stay open too — they
+describe the shape of the API and serve none of its data.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import bootstrap
+from . import auth, bootstrap, deletion, internal
 from .brief import BriefBuilder, brief_for_topic, brief_path
 from .competition import CompetitionAnalyser, LEVEL_MEANING, competition_for_topic
 from .config import get_config
 from .db import Database, js, unjs
-from .generation import MAX_BRIEF_CHARS, MAX_PER_RUN, MIN_BRIEF_CHARS, GenerationService
+from .generation import (MAX_BRIEF_CHARS, MAX_BRIEFS_PER_RUN, MAX_PER_RUN, MIN_BRIEF_CHARS,
+                         GenerationService)
 from .graph import LINK_MEANING, Linker
 from .pipeline.synthesis import GenerationConstraints
 from .llm import LLMClient
 from .pipeline.describe import DescriptionGenerator, description_for_topic
+from .presales import (PreSalesBuilder, collateral_for_topic, collateral_path,
+                       entry as collateral_entry, item_for as collateral_item,
+                       resolve_format as collateral_format)
 from .reference import ReferenceDataFetcher, reference_status
+from .scoping import MAX_MESSAGE_CHARS, MAX_MESSAGES, ScopingError, ScopingService
 from .sizing import MarketSizer, sizes_for_topic
 from .workflow import (AXIS_ANCHORS, AXIS_LABELS, ROLE_AXIS, STAGE_LABELS,
                        STAGE_OWNER_ROLE, STAGES, WorkflowService)
@@ -43,22 +57,75 @@ from .readmodel import (NOT_A_GENERATION, SORTS, ReadModel, facet_counts, matche
 
 log = logging.getLogger(__name__)
 
+#: `/api` paths that answer before anybody has signed in. Everything else is
+#: behind `require_session` below.
+#:
+#: `session` is public and always 200 rather than 401-when-anonymous: it is the
+#: probe the frontend runs on every load, and a route whose *normal* answer for a
+#: signed-out visitor is an error makes a signed-out visitor indistinguishable
+#: from a broken server, in the logs and in the browser console alike.
+PUBLIC_API_PATHS = frozenset({
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/session",
+})
+
+
+def require_session(request: Request) -> None:
+    """Refuse an `/api` request that carries no valid session.
+
+    Mounted as an application-level dependency rather than as middleware, for two
+    reasons. It runs INSIDE FastAPI's exception handling, so a refusal is an
+    ordinary `HTTPException` with a `detail` the frontend already knows how to
+    read, and it is inside the CORS middleware, so a refusal still carries the
+    headers that let a browser see it. It also does not apply to the mounted
+    static files, which is correct: the bundle is not a secret and the login
+    screen is part of it.
+
+    Non-`/api` paths pass straight through — the app shell, the assets, and the
+    platform's liveness probe.
+    """
+    path = request.url.path
+    if not path.startswith("/api/") or path in PUBLIC_API_PATHS:
+        return
+    try:
+        user = _auth.session_user(request.cookies.get(auth.SESSION_COOKIE))
+    except Exception as exc:  # noqa: BLE001
+        # The session table lives in the same file as everything else, so an
+        # unusable database fails here first — for every route at once. A 503
+        # naming the startup error is diagnosable; a stack trace per endpoint is
+        # the same fault reported forty different ways.
+        log.error("Session lookup failed: %s", exc)
+        raise HTTPException(503, bootstrap.STARTUP_ERROR
+                            or f"The radar cannot read its session store: {exc}") from exc
+    if user is None:
+        raise HTTPException(401, "Your session has ended. Sign in to continue.")
+    # Endpoints that need to know who is asking read it from here rather than
+    # taking a second dependency and a second lookup.
+    request.state.user = user
+
+
 app = FastAPI(
     title="Orange Business Innovation Radar",
     description="Read API for the Opportunity Spaces / Innovation Radar MVP.",
     version="0.1.0",
+    dependencies=[Depends(require_session)],
 )
 
 # The React dev server runs on a different origin. In production the built
 # bundle is served from THIS app (see the static mount at the bottom of this
 # file), so the deployed origin needs no CORS entry at all — the list stays
 # scoped to the local dev servers.
+#
+# `allow_credentials` is on because the session lives in a cookie and a
+# cross-origin fetch drops cookies without it. That combination is only safe
+# against an explicit origin list — never against `*` — which is what this is.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
                    "http://localhost:5174", "http://127.0.0.1:5174"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -92,6 +159,16 @@ except Exception as exc:  # noqa: BLE001
 
 _read = ReadModel(_cfg, _db)
 _workflow = WorkflowService(_cfg, _db)
+_auth = auth.AuthService(_db)
+
+try:
+    # A fresh database has no accounts, and an app nobody can sign in to is
+    # indistinguishable from a broken one. Seeding runs only against an EMPTY
+    # user table — see `ensure_seed_user` for why that distinction matters.
+    _auth.ensure_seed_user()
+except Exception as exc:  # noqa: BLE001 — same rule as the schema call above
+    bootstrap.STARTUP_ERROR = bootstrap.STARTUP_ERROR or f"{type(exc).__name__}: {exc}"
+    log.error("Could not seed the initial account: %s", exc)
 
 
 def _llm() -> LLMClient:
@@ -105,6 +182,123 @@ def _vocab_payload(vocab) -> list[dict[str, Any]]:
         {"id": item.id, "label": item.label, "definition": item.definition}
         for item in vocab
     ]
+
+
+class LoginIn(BaseModel):
+    # Bounded so a sign-in attempt cannot be used to post a megabyte into the
+    # hashing function. 256 is far past any real password and far short of a
+    # denial-of-service.
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=1, max_length=256)
+
+
+def _cookie_secure(request: Request) -> bool:
+    """Whether to mark the session cookie `Secure`.
+
+    Marking it `Secure` over plain HTTP means the browser silently discards it
+    and nobody can sign in; NOT marking it in production means the session
+    travels in clear over any downgraded hop. Neither is a safe default, so the
+    scheme is read from the request — via `x-forwarded-proto` first, because App
+    Service terminates TLS at the front end and the origin request arrives as
+    HTTP. `RADAR_COOKIE_SECURE` overrides both for a deployment that knows
+    better than the headers do.
+    """
+    override = os.getenv("RADAR_COOKIE_SECURE")
+    if override is not None:
+        return override.strip().lower() in {"1", "true", "yes", "on"}
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return (forwarded or request.url.scheme) == "https"
+
+
+def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        auth.SESSION_COOKIE, token,
+        max_age=int(auth.IDLE_HOURS * 3600),
+        # HttpOnly so an injected script cannot read the session; SameSite=Lax so
+        # another origin's form cannot post here with the cookie attached, which
+        # is the CSRF defence this API relies on instead of a token.
+        httponly=True, samesite="lax", path="/",
+        secure=_cookie_secure(request),
+    )
+
+
+@app.post("/api/auth/login")
+def login(payload: LoginIn, request: Request, response: Response) -> dict[str, Any]:
+    """Exchange a username and password for a session cookie.
+
+    Public by construction — it is the one door — and throttled per account, so
+    the door is not also a guessing machine.
+    """
+    try:
+        token, user = _auth.login(payload.username, payload.password)
+    except auth.RateLimited as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except auth.AuthError as exc:
+        # 401 rather than 400: the credential was understood and rejected.
+        raise HTTPException(401, str(exc)) from exc
+    _set_session_cookie(response, request, token)
+    return {"user": user}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response) -> dict[str, Any]:
+    """End this session and clear the cookie.
+
+    Public and idempotent. Requiring a session to sign out means an expired one
+    cannot be cleaned up, which leaves a dead cookie in the browser and a user
+    looking at a screen that will not let them in or out.
+    """
+    _auth.logout(request.cookies.get(auth.SESSION_COOKIE))
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return {"signed_out": True}
+
+
+@app.get("/api/auth/session")
+def session(request: Request) -> dict[str, Any]:
+    """Who is signed in, if anyone. Always 200 — see `PUBLIC_API_PATHS`."""
+    user = _auth.session_user(request.cookies.get(auth.SESSION_COOKIE))
+    return {
+        "authenticated": user is not None,
+        "user": user,
+        # The frontend shows the password rules beside the field it enforces
+        # them on, rather than discovering them from a rejection.
+        "password_policy": {"min_length": auth.MIN_PASSWORD_CHARS},
+    }
+
+
+@app.post("/api/auth/password")
+def change_password(payload: PasswordChangeIn, request: Request,
+                    response: Response) -> dict[str, Any]:
+    """Change the signed-in account's password.
+
+    The current password is required even though the session already proves
+    identity: the session may be an unlocked laptop, and a password change is
+    the one action that locks its owner out.
+
+    Every OTHER session for the account is ended — the usual reason to change a
+    password is that somebody else might know the old one — and this one is
+    reissued, so the person who just typed it correctly twice is not signed out
+    of the tab they did it in.
+    """
+    user = getattr(request.state, "user", None)
+    if user is None:  # pragma: no cover — require_session has already run
+        raise HTTPException(401, "Sign in to change a password.")
+    try:
+        _auth.login(user["username"], payload.current_password)
+    except auth.AuthError as exc:
+        raise HTTPException(403, "That is not the current password.") from exc
+    try:
+        _auth.set_password(user["username"], payload.new_password)
+        token, refreshed = _auth.login(user["username"], payload.new_password)
+    except auth.AuthError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    _set_session_cookie(response, request, token)
+    return {"user": refreshed, "signed_out_elsewhere": True}
 
 
 @app.get("/api/meta")
@@ -210,6 +404,41 @@ def topic(topic_id: str) -> dict[str, Any]:
 def history(topic_id: str) -> dict[str, Any]:
     """Score trajectory with the weight-set comparability warning (FR-20, §4.6)."""
     return _read.history(topic_id)
+
+
+@app.get("/api/topics/{topic_id}/deletion-impact")
+def topic_deletion_impact(topic_id: str) -> dict[str, Any]:
+    """Everything a delete would take with it, without taking any of it.
+
+    A `GET` that reads and returns, so it sits inside the read-only rule. It
+    exists because the confirmation dialog has to name the consequence — thirteen
+    tables point at a space, and "are you sure?" over a number nobody was shown
+    is not a confirmation.
+    """
+    try:
+        return deletion.deletion_impact(_db, topic_id)
+    except deletion.TopicNotFound as exc:
+        raise HTTPException(404, f"No such topic: {topic_id}") from exc
+
+
+@app.delete("/api/topics/{topic_id}")
+def delete_topic(topic_id: str, request: Request) -> dict[str, Any]:
+    """Remove an opportunity space and everything attached to it.
+
+    The report it returns is the impact computed a moment before the delete, so
+    the caller can say what actually went rather than that something did. See
+    `radar.deletion` for what travels with a space, what deliberately does not
+    (the signals — they are shared evidence), and why a space that sat in a
+    portfolio plan is reported rather than refused.
+    """
+    try:
+        report = deletion.delete_topic(_db, topic_id)
+    except deletion.TopicNotFound as exc:
+        raise HTTPException(404, f"No such topic: {topic_id}") from exc
+    user = getattr(request.state, "user", None)
+    log.warning("%s deleted opportunity space %s",
+                (user or {}).get("username", "unknown"), topic_id)
+    return {**report, "deleted_by": (user or {}).get("username")}
 
 
 @app.get("/api/whitespace")
@@ -690,6 +919,11 @@ class PlanIn(BaseModel):
     label: str = "Untitled plan"
     objective: str = "profit"
     plan_years: int = 5
+    # Where the set comes from. `parameters` lets the optimiser choose under the
+    # constraints below; `workflow` takes what the stage gate already decided
+    # and ignores every constraint that would second-guess it.
+    source: str = "parameters"
+    from_stage: str = "demand_tested"
     budget_person_years: float | None = None
     entry_slots_per_year: int | None = None
     pool_availability: float | None = None
@@ -703,8 +937,6 @@ class PlanIn(BaseModel):
     max_share_per_vertical: float | None = None
     max_share_per_technology: float | None = None
     max_competition: str | None = None
-    #: FR-25 stage gate (§4.10) — empty means every workflow stage is eligible.
-    workflow_stages: list[str] = []
 
 
 @app.get("/api/planner/meta")
@@ -716,7 +948,6 @@ def planner_meta() -> dict[str, Any]:
     with the engine would be worse than no form.
     """
     econ = _cfg.economics or {}
-    from .workflow import STAGES, STAGE_LABELS
     plannable = _db.query_one("""
         SELECT COUNT(DISTINCT o.id) n FROM opportunity_spaces o
         JOIN market_sizes m ON m.opportunity_id=o.id AND m.method='bottom_up_adoption'
@@ -730,6 +961,7 @@ def planner_meta() -> dict[str, Any]:
         a = unjs(r["attributes"], {}) or {}
         pools.append({"label": r["label"], "headcount": a.get("headcount", 0)})
     return {
+        "workflow": _workflow_plannable(),
         "economics_version": econ.get("economics_version"),
         "owner": econ.get("owner"),
         "source_filing": econ.get("source_filing"),
@@ -746,8 +978,45 @@ def planner_meta() -> dict[str, Any]:
         "sizes_by_confidence": by_conf,
         "verticals": [{"id": v.id, "label": v.label} for v in _cfg.verticals],
         "domains": [{"id": d.id, "label": d.label} for d in _cfg.domains],
-        "workflow_stages": [{"id": s, "label": STAGE_LABELS[s]} for s in STAGES],
     }
+
+
+def _workflow_plannable() -> dict[str, Any]:
+    """What the stage gate has committed, and how much of it can be projected.
+
+    The count that matters to the form is not how many spaces reached a stage
+    but how many of those carry a bottom-up size — a committed space without one
+    contributes nothing to any figure, and a form that counted it would promise
+    a plan bigger than the one that comes back.
+    """
+    from .planner import WORKFLOW_STAGES, WORKFLOW_STAGE_LABELS
+
+    rows = _db.query("""
+        SELECT w.stage,
+               COUNT(*) n,
+               SUM(CASE WHEN EXISTS (SELECT 1 FROM market_sizes m
+                                     WHERE m.opportunity_id = o.id
+                                       AND m.method = 'bottom_up_adoption'
+                                       AND m.som_base > 0) THEN 1 ELSE 0 END) sized
+        FROM workflow_state w JOIN opportunity_spaces o ON o.id = w.opportunity_id
+        WHERE o.merged_into IS NULL GROUP BY 1""")
+    counts = {r["stage"]: {"count": r["n"], "sized": r["sized"] or 0} for r in rows}
+    stages = []
+    for i, stage in enumerate(WORKFLOW_STAGES):
+        here = counts.get(stage, {"count": 0, "sized": 0})
+        onward = [counts.get(s, {"count": 0, "sized": 0}) for s in WORKFLOW_STAGES[i:]]
+        stages.append({
+            "id": stage,
+            "label": WORKFLOW_STAGE_LABELS[stage],
+            "count": here["count"],
+            "sized": here["sized"],
+            # "or further" — what a plan starting at this stage would actually take.
+            "cumulative": sum(c["count"] for c in onward),
+            "cumulative_sized": sum(c["sized"] for c in onward),
+        })
+    return {"stages": stages,
+            "default_from_stage": "demand_tested",
+            "parked": sum(counts.get(s, {}).get("count", 0) for s in ("parked", "rejected"))}
 
 
 @app.get("/api/planner/plans")
@@ -1046,6 +1315,106 @@ def brief_pdf(topic_id: str, download: bool = Query(False)) -> FileResponse:
     )
 
 
+@app.get("/api/topics/{topic_id}/presales")
+def presales_index(topic_id: str) -> dict[str, Any]:
+    """The whole collateral catalogue for one space, each entry with its state.
+
+    Always the full catalogue, never only what has been built: this endpoint
+    backs a tab whose job is to say what COULD be produced as much as what has
+    been, and a list that starts empty is a list nobody presses a button on.
+    """
+    if _read.topic(topic_id) is None:
+        raise HTTPException(404, f"No such topic: {topic_id}")
+    return {"topic_id": topic_id, "items": collateral_for_topic(_db, topic_id)}
+
+
+@app.post("/api/topics/{topic_id}/presales/{kind}")
+def generate_presales(topic_id: str, kind: str,
+                      fmt: str | None = Query(None, description="pdf | docx | odt | pptx | odp | md"),
+                      force: bool = Query(False)) -> dict[str, Any]:
+    """Build one piece of collateral, generating its inputs if they are missing.
+
+    The expensive input is the narrative, and it is generated here rather than
+    demanded of the user: somebody who pressed "Generate" on a battlecard wants
+    a battlecard, not an error telling them to press a different button first.
+    Sizing and competition are cheap and deterministic, so they are simply
+    computed. A narrative that will not build is logged and the piece is
+    rendered without it, carrying a banner that says so — the same posture
+    `generate_brief` takes.
+    """
+    row = _db.query_one("SELECT * FROM opportunity_spaces WHERE id = ?", (topic_id,))
+    if row is None:
+        raise HTTPException(404, f"No such topic: {topic_id}")
+    try:
+        spec = collateral_entry(kind)
+        fmt = collateral_format(kind, fmt)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        # An unsupported format is the caller's mistake, not a server fault, and
+        # the message names what IS available rather than only what is not.
+        raise HTTPException(400, str(exc)) from exc
+
+    existing = collateral_item(_db, topic_id, kind)
+    built = (existing or {}).get("builds", {}).get(fmt)
+    if built and built.get("exists") and not built.get("stale") and not force:
+        return existing
+
+    needs = spec["needs"]
+    if "sizing" in needs and not sizes_for_topic(_db, topic_id):
+        MarketSizer(_cfg, _db).run(topic_ids=[topic_id])
+    if ("competition" in needs or "analysis" in needs) and competition_for_topic(_db, topic_id) is None:
+        CompetitionAnalyser(_cfg, _db).run(topic_ids=[topic_id])
+    if "description" in needs:
+        stored = description_for_topic(_db, topic_id)
+        if stored is None or stored["stale"] or force:
+            try:
+                DescriptionGenerator(_cfg, _db, _llm()).generate(dict(row))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Collateral %s for %s built without a fresh description: %s",
+                            kind, topic_id, exc)
+
+    try:
+        return PreSalesBuilder(_cfg, _db, _llm()).build(topic_id, kind, fmt)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"{spec['title']} generation failed: {exc}") from exc
+
+
+@app.get("/api/topics/{topic_id}/presales/{kind}/file")
+def presales_file(topic_id: str, kind: str, fmt: str | None = Query(None),
+                  download: bool = Query(False)) -> FileResponse:
+    """The file itself.
+
+    Inline by default so a PDF can be previewed in the tab; as an attachment
+    with ?download=1. PowerPoint, Word and Markdown have no inline viewer worth
+    the name, so the frontend always asks for the attachment form for those —
+    but the choice stays here rather than being hard-coded per format, because
+    a browser that CAN preview one should be allowed to.
+    """
+    try:
+        collateral_entry(kind)
+        fmt = collateral_format(kind, fmt)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    path = collateral_path(_db, topic_id, kind, fmt)
+    if path is None:
+        raise HTTPException(
+            404, f"No {kind} generated for {topic_id} as .{fmt}. POST to this path first.")
+    build = ((collateral_item(_db, topic_id, kind) or {}).get("builds", {})).get(fmt, {})
+    disposition = "attachment" if download else "inline"
+    return FileResponse(
+        path, media_type=build.get("media_type", "application/octet-stream"),
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{build.get("filename", path.name)}"',
+            # Regenerated in place, so a cached copy would serve a stale document
+            # from the same URL.
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @app.get("/api/analytics/market-size")
 def analytics_market_size() -> dict[str, Any]:
     """Sized opportunity by vertical, for the analytics view."""
@@ -1279,6 +1648,206 @@ def start_generation_from_brief(payload: GenerateFromBriefIn) -> dict[str, Any]:
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     return _job_payload(job)
+
+
+class GenerateFromBriefsIn(BaseModel):
+    """Several briefs, one run.
+
+    The plural endpoint exists because the scoping conversation can legitimately
+    land on more than one taxonomy triple, and synthesis holds the only write
+    lock on that identity — three separate requests would mean two 409s.
+    """
+
+    descriptions: list[str] = Field(
+        min_length=1, max_length=MAX_BRIEFS_PER_RUN,
+        description="One search brief per opportunity space to attempt. Each is treated the same "
+                    "way the singular endpoint treats its description: a retrieval request, never "
+                    "evidence.",
+    )
+    run_critic: bool = True
+    run_entailment: bool = True
+
+
+@app.post("/api/generate/briefs")
+def start_generation_from_briefs(payload: GenerateFromBriefsIn) -> dict[str, Any]:
+    """Generate one opportunity space per written brief, in a single run."""
+    try:
+        job = _generation.start_from_briefs(payload.descriptions,
+                                            run_critic=payload.run_critic,
+                                            run_entailment=payload.run_entailment)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _job_payload(job)
+
+
+class HypothesisIn(BaseModel):
+    """Build a space the corpus cannot evidence, on evidence you supply.
+
+    The description is still a search brief. What is new is `rationale`: what the
+    person actually knows — the conversation they had, the RFP they saw, the deal
+    they lost — which is recorded as an internal signal and becomes the evidence
+    the space rests on.
+    """
+
+    description: str = Field(min_length=MIN_BRIEF_CHARS, max_length=MAX_BRIEF_CHARS)
+    rationale: str = Field(
+        min_length=80, max_length=2000,
+        description="What you know that the corpus does not. This is stored as an attributable, "
+                    "dated internal signal (FR-24) and cited by the resulting space — so it has "
+                    "to say something a colleague could act on, not restate the brief.",
+    )
+    kind: str = Field(
+        "customer_conversation",
+        description="Which of the three internal evidence kinds this is (§2.5).",
+    )
+    vertical: str | None = None
+    geographies: list[str] = Field(default_factory=list)
+    run_critic: bool = True
+    run_entailment: bool = True
+
+
+@app.post("/api/generate/hypothesis")
+def start_generation_from_hypothesis(payload: HypothesisIn, request: Request) -> dict[str, Any]:
+    """Generate a space the external corpus is silent about (FR-24, §2.5).
+
+    THE CASE THIS EXISTS FOR. The corpus cannot evidence a genuinely new idea —
+    that is what "new" means — and the scoping conversation was refusing on
+    exactly that basis, which made the screen useless for the thing it was most
+    wanted for. Fabricating the evidence was never an option: §4.4.4's whole
+    posture is that a claim rests on a dated, attributable source or it does not
+    exist, and a space citing signals that are not about it is the failure this
+    system was built to prevent.
+
+    So the evidence is not invented, it is CONTRIBUTED. What the person knows is
+    recorded as an internal signal — authored by them, dated now, moderated as
+    the act of asserting it, promoted at tier 3 because §4.3.7 reserves the
+    higher tiers for published records and a conversation is not one. Then the
+    ordinary brief run proceeds, unchanged: it retrieves that signal along with
+    whatever adjacent evidence exists, and every claim still has to cite what
+    came back and survive the critic and the entailment check.
+
+    What comes out is honest in both directions. The space exists, and it scores
+    low — one tier-3 signal, no independent corroboration — because a hypothesis
+    is not a proven trend, and the radar saying so is the feature rather than a
+    shortcoming to work around.
+    """
+    if (reason := _generation.encoder_reason()) is not None:
+        raise HTTPException(409, reason)
+    if payload.kind not in internal.KINDS:
+        raise HTTPException(400, f"Unknown kind {payload.kind!r}. "
+                                 f"Known: {', '.join(sorted(internal.KINDS))}")
+    if payload.vertical and payload.vertical not in _cfg.verticals:
+        raise HTTPException(400, f"Unknown vertical {payload.vertical!r}.")
+
+    author = getattr(request.state, "user", None) or {}
+    author_name = str(author.get("username") or author.get("display_name") or "unknown")
+
+    internal_id = internal.record(
+        _db, author=author_name, kind=payload.kind,
+        # The brief is the headline the signal is retrieved by; the rationale is
+        # its substance. Titling it with the rationale's first words instead
+        # would make the signal retrieve badly against the very brief it exists
+        # to support.
+        title=payload.description[:180],
+        body=payload.rationale,
+        vertical=payload.vertical,
+        geographies=payload.geographies,
+        # Moderated by the act of asserting it, under a named account. That is
+        # weaker than independent review and stronger than an anonymous note,
+        # and it is recorded either way: `author` says who to ask.
+        moderated=True,
+    )
+    # Embedded on the way in, or the signal this run exists to use would be
+    # invisible to the retrieval that run performs until the next full refresh.
+    internal.promote(_cfg, _db, embedder=_generation.embedder())
+
+    try:
+        job = _generation.start_from_briefs([payload.description],
+                                            run_critic=payload.run_critic,
+                                            run_entailment=payload.run_entailment)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    job.say(f"Contributed evidence {internal_id} by {author_name} (internal, tier 3) — this run "
+            f"rests on it. It is an assertion, not a published record, and the score will say so.")
+    payload_out = _job_payload(job)
+    payload_out["internal_signal_id"] = internal_id
+    return payload_out
+
+
+# ---------------------------------------------------------------------------
+# The scoping conversation (the Generate screen's assistant tab)
+#
+# Declared BEFORE /api/generate/{job_id}: FastAPI matches routes in declaration
+# order, and "chat" is a perfectly good job id as far as that pattern is
+# concerned.
+#
+# Stateless. The transcript lives in the browser and arrives whole on every
+# turn — there is no session to expire, nothing to clean up, and a conversation
+# is worth nothing once its briefs have been run. It is also the only thing
+# here that costs a model call per request, which is why the opening turn is
+# written rather than generated.
+# ---------------------------------------------------------------------------
+
+
+class ChatMessageIn(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+
+
+class ScopingChatIn(BaseModel):
+    messages: list[ChatMessageIn] = Field(min_length=1, max_length=MAX_MESSAGES)
+
+
+def _scoping() -> ScopingService:
+    """Built per request, sharing the generation service's loaded encoder.
+
+    Retrieval on every turn goes against the same stored signal vectors the run
+    will read, so a second copy of the sentence-transformer model would be
+    several hundred megabytes bought to compute identical numbers.
+    """
+    return ScopingService(_cfg, _db, embedder=_generation.embedder())
+
+
+@app.get("/api/generate/chat")
+def scoping_opening() -> dict[str, Any]:
+    """The assistant's first turn, and what it can see.
+
+    Costs no model call: the opening is written (`prompts.SCOPING_OPENING`),
+    because it is identical every time and paying for it would buy nothing but
+    latency on a screen nobody has typed into yet.
+    """
+    if (reason := _generation.encoder_reason()) is not None:
+        # The conversation retrieves as its whole reason for existing. Without
+        # the encoder it would be a chatbot with opinions and no corpus, which
+        # is precisely the thing this screen is built not to be.
+        raise HTTPException(409, reason)
+    return _scoping().opening()
+
+
+@app.post("/api/generate/chat")
+def scoping_turn(payload: ScopingChatIn) -> dict[str, Any]:
+    """One turn: answer, re-retrieve, report what is still missing.
+
+    The response carries more than a reply because the screen shows more than a
+    reply — what has been understood, what the words retrieved, and which briefs
+    would actually run. `ready` is the server's verdict, not the model's: every
+    proposed brief is put through the same retrieval the job will perform, and a
+    brief the corpus cannot answer disables the button it would otherwise enable.
+    """
+    if (reason := _generation.encoder_reason()) is not None:
+        raise HTTPException(409, reason)
+    try:
+        return _scoping().reply([m.model_dump() for m in payload.messages])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ScopingError as exc:
+        # 502 rather than 500: the radar is fine, the model provider is not, and
+        # the difference decides whether retrying is worth anything.
+        raise HTTPException(502, f"The scoping assistant could not answer: {exc}") from exc
 
 
 @app.get("/api/generate/jobs")

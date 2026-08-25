@@ -4,7 +4,23 @@
 portfolio of opportunity spaces Orange should expand into, and say what it is
 expected to return.*
 
-**Status: proposal. Nothing here is built.**
+**Status: BUILT.** This document is kept as the design note the Planner was
+written from, not as a plan for future work. What actually shipped is described
+in the [Functional Design Document](Orange_Innovation_Radar_Functional_Design_Document.docx)
+section 11b and the [Technical Architecture](Orange_Innovation_Radar_Technical_Architecture.docx)
+section 9c, and it differs from this proposal in three places worth naming:
+
+* **There are two sources for the set, not one.** This document assumes the
+  optimiser always chooses. It also takes the set as already decided by the
+  stage gate, in which case nothing is optimised and nothing is dropped — see
+  D-15 in [DECISIONS.md](DECISIONS.md).
+* **Margin varies by portfolio distance.** This document applies the filed
+  segment margin flat. That is a fully loaded figure, so applying it to
+  incremental revenue understates L0 and overstates L3; the correction moves
+  five-year profit by about 1.66×.
+* **No ROI is offered.** This document contemplates one. There is no cost data
+  at the granularity a space needs, anywhere the pipeline can reach, so an ROI
+  would require inventing the denominator.
 
 ---
 

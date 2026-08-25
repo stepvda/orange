@@ -134,6 +134,13 @@ def main(argv: list[str] | None = None) -> int:
 
     plan = sub.add_parser("plan", help="Build a five-year portfolio plan (the Planner)")
     plan.add_argument("--label", default="Untitled plan")
+    plan.add_argument("--source", default="parameters", choices=["parameters", "workflow"],
+                      help="Where the portfolio comes from. 'parameters' lets the optimiser "
+                           "choose under the constraints below; 'workflow' takes every space the "
+                           "stage gate has already committed and applies none of them")
+    plan.add_argument("--from-stage", default="demand_tested",
+                      choices=["demand_tested", "packaged", "live"],
+                      help="With --source workflow: include this stage and everything after it")
     plan.add_argument("--objective", default="profit",
                       choices=["profit", "revenue", "npv", "strategic_coverage"])
     plan.add_argument("--years", type=int, default=5)
@@ -390,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
 
         inputs = PlanInputs(
             label=args.label, objective=args.objective, plan_years=args.years,
+            source=args.source, from_stage=args.from_stage,
             budget_person_years=args.budget, entry_slots_per_year=args.slots,
             pool_availability=args.availability, min_confidence=args.min_confidence,
             max_portfolio_distance=args.max_distance,

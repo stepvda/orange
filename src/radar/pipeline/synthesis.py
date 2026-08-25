@@ -252,6 +252,39 @@ class SynthesisStats:
 
     _EXCLUDE_FROM_DICT = ("rejections", "processed_cluster_ids")
 
+    #: Counters that are simply summed when several passes are reported as one
+    #: run. Named rather than inferred from the type, because `rounds` is an int
+    #: too and adding it would report a two-brief run as having gone round twice.
+    _SUMMED = ("clusters_processed", "raw_candidates", "failed_vocabulary", "failed_specificity",
+               "failed_evidence", "failed_critic", "merged_duplicates", "accepted",
+               "entailment_stripped", "failed_constraints", "duplicate_of_existing",
+               "duplicate_retries")
+
+    def absorb(self, other: "SynthesisStats") -> "SynthesisStats":
+        """Fold another pass into this one — for a run made of several briefs.
+
+        The one subtlety is the created/updated split, and it is the same one
+        `_persist` already guards inside a single pass: a second brief landing
+        on the triple a first brief just created UPDATES the row, and its own
+        stats object has no way to know that row is seconds old. Reported
+        unadjusted, one space would arrive as "1 created and 1 refreshed", and
+        the shortfall message would offer a DR-03 explanation for an event that
+        never happened. So `created` wins wherever the two lists overlap.
+        """
+        for name in self._SUMMED:
+            setattr(self, name, getattr(self, name) + getattr(other, name))
+        self.rounds = max(self.rounds, other.rounds)
+        self.rejections.extend(other.rejections)
+        self.processed_cluster_ids.extend(other.processed_cluster_ids)
+        for topic_id in other.created_ids:
+            if topic_id not in self.created_ids:
+                self.created_ids.append(topic_id)
+        for topic_id in other.updated_ids:
+            if topic_id not in self.updated_ids and topic_id not in self.created_ids:
+                self.updated_ids.append(topic_id)
+        self.updated_ids = [i for i in self.updated_ids if i not in self.created_ids]
+        return self
+
     def as_dict(self) -> dict[str, Any]:
         data = {k: v for k, v in self.__dict__.items() if k not in self._EXCLUDE_FROM_DICT}
         data["rejections_sample"] = self.rejections[:20]
@@ -260,6 +293,13 @@ class SynthesisStats:
 
 
 class Synthesiser:
+    #: Model calls that never returned, and the last reason. A run whose passes
+    #: all fail has not learned anything about the corpus, and must not report
+    #: an evidence verdict — see `_generate`.
+    llm_failures: int
+    llm_successes: int
+    last_llm_error: str | None
+
     def __init__(self, cfg: Config, db: Database, llm: LLMClient, embedder: Embedder | None = None,
                  constraints: GenerationConstraints | None = None):
         self.cfg = cfg
@@ -267,6 +307,10 @@ class Synthesiser:
         self.llm = llm
         self.embedder = embedder or Embedder()
         self.constraints = constraints or GenerationConstraints()
+        self.llm_failures = 0
+        self.llm_successes = 0
+        self.last_llm_error: str | None = None
+        self._fail_lock = threading.Lock()
         cur = cfg.settings["curation"]
         self.min_chars = int(cur["statement_min_chars"])
         self.max_chars = int(cur["statement_max_chars"])
@@ -1034,8 +1078,22 @@ class Synthesiser:
                     system, user, strong=True, temperature=self.temperature, max_tokens=4000
                 )
             except Exception as exc:  # noqa: BLE001
-                log.warning("Synthesis pass %d failed for cluster %s: %s", index, payload["cluster_id"], exc)
+                # A swallowed provider failure is indistinguishable from a
+                # cluster that had nothing to say, and the two need completely
+                # different answers. Left as a bare log line, an unreachable
+                # model produced a run that read every cluster, created nothing,
+                # and reported "the evidence in scope did not support more" —
+                # blaming the corpus for a network fault, which is the most
+                # misleading thing this pipeline can say. Counted here so the
+                # run can tell the difference.
+                log.warning("Synthesis pass %d failed for cluster %s: %s", index,
+                            payload["cluster_id"], exc)
+                with self._fail_lock:
+                    self.llm_failures += 1
+                    self.last_llm_error = f"{type(exc).__name__}: {exc}"
                 return []
+            with self._fail_lock:
+                self.llm_successes += 1
             return self._parse(data)
 
         out: list[Candidate] = []

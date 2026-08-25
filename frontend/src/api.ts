@@ -1,10 +1,43 @@
 import type {
-  BriefMeta, Competition, CompetitorAnalysis, Coverage, FilterState, GenerationConstraints, GenerationJob,
+  BriefMeta, CollateralItem, Competition, CompetitorAnalysis, Coverage, DeletionImpact,
+  DeletionReport, PreSalesIndex,
+  FilterState, GenerationConstraints, GenerationJob,
   Plan, PlannerMeta, PlanRequest, PlanReport, PlanReportStatus,
-  GenerationMatch, GenerationOptions, MarketSize, Meta, RadarView, Topic, TopicDescription,
+  GenerationMatch, GenerationOptions, MarketSize, Meta, RadarView, SessionInfo, Topic,
+  TopicDescription, User,
+  ChatMessage, HypothesisRequest, ScopingOpening, ScopingTurn,
 } from './types'
 
 const BASE = '/api'
+
+/** Where a session that has ended gets reported.
+ *
+ * A session expires between page loads far more often than during one, but when
+ * it does the symptom is every panel on screen showing "Your session has ended"
+ * as a data error — which is both wrong (the radar is fine) and useless (there
+ * is no way to act on it from a panel). One place decides, and it flips the
+ * whole app back to the sign-in screen.
+ *
+ * Registered by App rather than imported by it, because this module must not
+ * depend on React to know what to do about a 401.
+ */
+let onSessionEnded: (() => void) | null = null
+
+export function setSessionEndedHandler(handler: (() => void) | null) {
+  onSessionEnded = handler
+}
+
+/** True when the response is a signed-out 401, having told the app about it.
+ *
+ * Deliberately narrow: `/api/auth/login` answers 401 for a wrong password, and
+ * treating THAT as a lost session would blank the login form the moment somebody
+ * mistypes.
+ */
+function sessionEnded(res: Response, path: string): boolean {
+  if (res.status !== 401 || path.startsWith('/auth/')) return false
+  onSessionEnded?.()
+  return true
+}
 
 async function get<T>(path: string, params?: Record<string, string | string[] | undefined>): Promise<T> {
   const url = new URL(BASE + path, window.location.origin)
@@ -14,12 +47,39 @@ async function get<T>(path: string, params?: Record<string, string | string[] | 
     if (Array.isArray(value)) value.forEach((v) => url.searchParams.append(key, v))
     else url.searchParams.set(key, value)
   }
-  const res = await fetch(url.toString())
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${res.statusText} — ${body.slice(0, 200)}`)
-  }
+  const res = await fetch(url.toString(), { credentials: 'same-origin' })
+  if (!res.ok) { sessionEnded(res, path); throw await failure(res, path) }
   return parse<T>(res, path)
+}
+
+/** Turn a failed response into an error somebody can act on.
+ *
+ * The API puts the real reason in `detail` — a model failure, a missing key, a
+ * run already in flight — and reporting the status line instead would leave the
+ * user with "500" for every one of them.
+ *
+ * The case worth naming is a 500 with NO body at all. The API never produces
+ * one: an unhandled exception in FastAPI still answers with text, and every
+ * deliberate refusal here carries a `detail`. An empty-bodied 500 comes from
+ * the Vite dev proxy when the backend it forwards to is not running — and its
+ * symptom, `500 Internal Server Error — ` with nothing after the dash, appears
+ * on every panel of the screen at once and says nothing about the cause. In dev
+ * the cause is nearly always that the API process stopped, so that is what this
+ * says.
+ */
+async function failure(res: Response, path: string): Promise<Error> {
+  const body = (await res.text().catch(() => '')).trim()
+  if (!body && res.status >= 500) {
+    return new Error(
+      `${res.status} from ${BASE}${path} with an empty body, which the API never sends — every `
+      + 'refusal it makes carries a reason. In development this is the dev-server proxy answering '
+      + 'for a backend that is not running: start it (radar serve, or uvicorn radar.api:app '
+      + '--port 8000) and retry.',
+    )
+  }
+  let detail = body.slice(0, 300)
+  try { detail = JSON.parse(body).detail ?? detail } catch { /* not JSON */ }
+  return new Error(detail || `${res.status} ${res.statusText}`)
 }
 
 /** Read a JSON body, or say what arrived instead.
@@ -51,23 +111,46 @@ async function parse<T>(res: Response, path: string): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(BASE + path, {
     method: 'POST',
+    credentials: 'same-origin',
     ...(body === undefined ? {} : {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
   })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    // The API puts the real reason in `detail` — a model failure, a missing
-    // key — and swallowing it would leave the user with "500".
-    let message = body.slice(0, 300)
-    try { message = JSON.parse(body).detail ?? message } catch { /* not JSON */ }
-    throw new Error(message || `${res.status} ${res.statusText}`)
-  }
+  if (!res.ok) { sessionEnded(res, path); throw await failure(res, path) }
+  return parse<T>(res, path)
+}
+
+/** The one destructive verb in this client, and the only caller is a dialog
+ *  that has already shown the user what it is about to remove. */
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(BASE + path, { method: 'DELETE', credentials: 'same-origin' })
+  if (!res.ok) { sessionEnded(res, path); throw await failure(res, path) }
   return parse<T>(res, path)
 }
 
 export const api = {
+  /* --- signing in ----------------------------------------------------------
+   * The session is an HttpOnly cookie, so none of these return a token and
+   * nothing here stores one: the browser attaches it and script cannot read it.
+   * That is the point — a token this module could hold is a token an injected
+   * script could steal. */
+
+  /** Who is signed in. Always 200, so a signed-out visitor is not reported as a
+   *  broken server. */
+  session: () => get<SessionInfo>('/auth/session'),
+
+  login: (username: string, password: string) =>
+    post<{ user: User }>('/auth/login', { username, password }),
+
+  logout: () => post<{ signed_out: boolean }>('/auth/logout'),
+
+  /** Ends every other session for the account; this one is reissued. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    post<{ user: User }>('/auth/password', {
+      current_password: currentPassword, new_password: newPassword,
+    }),
+
   meta: () => get<Meta>('/meta'),
 
   view: (role: string, filters: FilterState, limit?: number | null, sort?: string) =>
@@ -86,6 +169,15 @@ export const api = {
     }),
 
   topic: (id: string) => get<Topic>(`/topics/${id}`),
+
+  /** What a delete would take, without taking any of it. Read by the
+   *  confirmation dialog: thirteen tables point at a space, and "are you sure?"
+   *  over a number nobody was shown is not a confirmation. */
+  deletionImpact: (id: string) => get<DeletionImpact>(`/topics/${id}/deletion-impact`),
+
+  /** Removes the space and everything attached to it. Returns the impact as it
+   *  stood a moment before, so the caller can say what actually went. */
+  deleteTopic: (id: string) => del<DeletionReport>(`/topics/${id}`),
 
   marketSize: (id: string) => get<{ topic_id: string; estimates: MarketSize[] }>(`/topics/${id}/market-size`),
 
@@ -141,6 +233,26 @@ export const api = {
 
   briefDownloadUrl: (id: string) => `${BASE}/topics/${id}/brief.pdf?download=1`,
 
+  /** The whole pre-sales catalogue for one space, each entry with its state. */
+  presales: (id: string) => get<PreSalesIndex>(`/topics/${id}/presales`),
+
+  /** Build one piece in one format. `force` rebuilds a piece that is current. */
+  generateCollateral: (id: string, kind: string, fmt: string, force = false) =>
+    post<CollateralItem>(
+      `/topics/${id}/presales/${kind}?fmt=${encodeURIComponent(fmt)}${force ? '&force=true' : ''}`),
+
+  /** Always the attachment form. PowerPoint, Word and ODF have no inline viewer
+   *  worth the name, and a PDF that opens in a tab is one the reader has to
+   *  save by hand anyway — the one button that always does what it says beats
+   *  two that sometimes do. */
+  collateralDownloadUrl: (id: string, kind: string, fmt: string) =>
+    `${BASE}/topics/${id}/presales/${kind}/file?fmt=${encodeURIComponent(fmt)}&download=1`,
+
+  /** Cache-busted, so a rebuilt document is never served from the viewer cache. */
+  collateralViewUrl: (id: string, kind: string, fmt: string, version?: string) =>
+    `${BASE}/topics/${id}/presales/${kind}/file?fmt=${encodeURIComponent(fmt)}`
+    + (version ? `&v=${encodeURIComponent(version)}` : ''),
+
   whitespace: (filters?: FilterState) =>
     get<{ count: number; total_unfiltered: number; topics: Topic[] }>('/whitespace', {
       vertical: filters?.vertical,
@@ -181,6 +293,35 @@ export const api = {
    *  become the only facts the model may cite. */
   startGenerationFromBrief: (description: string) =>
     post<GenerationJob>('/generate/brief', { description }),
+
+  /** One space per brief, in a single run. The scoping conversation can land on
+   *  several distinct taxonomy triples, and synthesis holds the only write lock
+   *  on that identity — separate requests would just collect 409s. */
+  startGenerationFromBriefs: (descriptions: string[]) =>
+    post<GenerationJob>('/generate/briefs', { descriptions }),
+
+  /* --- the scoping conversation ---------------------------------------------
+   * Stateless: the transcript lives here and is posted whole on every turn, so
+   * there is no session to expire and a reload loses a conversation rather than
+   * leaking one. The opening turn is a GET because it is written, not generated,
+   * and costs no model call. */
+
+  /** Build a space the corpus is silent about, on evidence you contribute.
+   *
+   *  Not a bypass of the evidence rule — the opposite. The rationale is recorded
+   *  as a dated, attributable internal signal (FR-24, tier 3) and the ordinary
+   *  run then cites it, so the space rests on a named person's assertion rather
+   *  than on nothing, and scores like the hypothesis it is. */
+  startGenerationFromHypothesis: (body: HypothesisRequest) =>
+    post<GenerationJob & { internal_signal_id: string }>('/generate/hypothesis', body),
+
+  scopingOpening: () => get<ScopingOpening>('/generate/chat'),
+
+  /** One turn. The reply carries the retrieval and the readiness verdict as
+   *  well as the words, because the screen shows all three — a chat bubble on
+   *  its own would hide the part that makes this different from a text box. */
+  scopingTurn: (messages: ChatMessage[]) =>
+    post<ScopingTurn>('/generate/chat', { messages }),
 
   generationJob: (id: string) => get<GenerationJob>(`/generate/${id}`),
 

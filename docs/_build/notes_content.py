@@ -29,7 +29,7 @@ t = d.d.add_table(rows=1, cols=1); c = t.cell(0, 0)
 _shade(c._tc.get_or_add_tcPr(), "FFF1E3"); _nobord(c)
 c.paragraphs[0]._p.getparent().remove(c.paragraphs[0]._p)
 for txt, sz, bold, col in [
-        ("20 slides   ·   target running time 9 minutes 20 seconds", 12.5, True, ORANGE_D),
+        ("26 slides   ·   target running time 12 minutes 15 seconds", 12.5, True, ORANGE_D),
         ("One page per slide. Read the SAY block; the green bar at the foot of each page is your cue to advance.", 11, False, INK)]:
     pp = c.add_paragraph(); pp.paragraph_format.space_after = Pt(3)
     rr = pp.add_run(txt); rr.font.size = Pt(sz); rr.font.bold = bold; rr.font.color.rgb = col; rr.font.name = FONT
@@ -37,9 +37,10 @@ d.spacer(14)
 
 d.kv([
     ("Deck", "docs/Orange_Innovation_Radar.pptx"),
-    ("Reference recording", "docs/Orange_Innovation_Radar.mp4  ·  9 min 18 s"),
-    ("Notes transcribed from", "the recorded walkthrough, corrected and lightly expanded"),
-    ("Version", "1.0  ·  19 August 2026"),
+    ("Reference recording", "docs/Orange_Innovation_Radar.mp4"),
+    ("Companion walkthrough", "docs/Orange_Innovation_Radar_Walkthrough.pptx  ·  docs/Orange_Innovation_Radar_Demo.mp4"),
+    ("Notes transcribed from", "the recorded walkthrough, corrected and extended for the six slides added since"),
+    ("Version", "1.1  ·  24 August 2026"),
 ])
 d.pagebreak()
 
@@ -53,25 +54,29 @@ d.box("PAGE STRUCTURE", [
     "**The green bar** — your cue to advance. It names the next slide, so you know what is coming before you press the key.",
 ], accent=ORANGE_D, fill="FFF1E3")
 d.p("**Timings are a guide, not a script.** The clock column shows where you should be if you are keeping to the "
-    "recorded pace. If you run long on the concept slides, the demo section (9–15) is where the time is easiest to make back.", after=12)
+    "recorded pace. If you run long on the concept slides, the demo section (10–21) is where the time is easiest to "
+    "make back — and the two Planner pages are the ones to cut first if the room is a sales audience rather than a "
+    "strategy one.", after=12)
 
 d.h("One thing to decide before you start", size=15, color=INK, before=4)
-d.p("Slides 9 to 15 were **not presented as slides** in the recording — they were a single live walkthrough of the "
-    "running application, about two and a half minutes. The deck carries screenshots of the same seven views so the "
-    "talk works either way.", after=6)
+d.p("Slides 10 to 21 are the **live application**, not slides. The deck carries a screenshot of each of the twelve "
+    "views so the pack reads on its own and so a presenter who cannot reach the running instance can still give the "
+    "talk — but the material is written to be demonstrated.", after=6)
 d.box("IF YOU DEMO LIVE", [
-    "Have the app open on a second window before you start, on the radar view, with the role set to Strategist.",
-    "The seven pages of notes for slides 9–15 are written so they work as a demo script: follow them in order and you will have walked the same path as the recording.",
-    "Budget the same 2 min 30 s. A live demo always runs longer than you expect — if you are behind the clock at slide 9, show the radar and the topic detail only, then jump to slide 16.",
+    "Have the app open on a second window before you start, on the radar view, with the role set to Strategist, and **already signed in** — the sign-in screen is not part of the story you are telling.",
+    "The twelve pages of notes for slides 10–21 work as a demo script: follow them in order and you will have walked the same path as the recorded demo.",
+    "Budget about **five minutes**. A live demo always runs longer than you expect — if you are behind the clock at slide 10, show the radar, the topic detail and the Planner only, then jump to slide 22.",
+    "The two document-heavy views (the sales brief on slide 13's tab, and the Planner's document tab on slide 19) take a second to render. Open them a beat before you talk about them.",
 ], accent=BLUE, fill="EAF1F9")
 d.box("IF YOU PRESENT FROM THE SCREENSHOTS", [
-    "Just advance normally. Slides 10, 13, 14 and 15 are short — do not pad them; the pace is deliberate.",
+    "Just advance normally. Slides 11, 17 and 21 are short — do not pad them; the pace is deliberate.",
+    "There is a second film for the demo half alone: **Orange_Innovation_Radar_Demo.mp4**, seven chapters against the running application. If the room wants to see the tool rather than the argument, show that instead of this deck.",
 ], accent=GREEN, fill="E4F1EA")
 d.h("The three-part shape, if you need to cut", size=15, color=INK, before=8)
 d.box("WHAT IS LOAD-BEARING AND WHAT IS NOT", [
-    "**Part 1 — why and the concepts (slides 1–8, 0:00–4:17).** Load-bearing. Slide 4 (two scores) and slide 6 (portfolio distance) are the two you cannot drop; everything later refers back to them.",
-    "**Part 2 — the product (slides 9–15, 4:17–6:44).** Compressible. The radar view and the score-explanation panel carry the argument; the rest is supporting.",
-    "**Part 3 — architecture and status (slides 16–20, 6:44–9:18).** Slide 19 is the one the room will want to talk about — leave time for it.",
+    "**Part 1 — why and the concepts (slides 1–9, 0:00–4:51).** Load-bearing. Slide 4 (two scores) and slide 6 (portfolio distance) are the two you cannot drop; everything later refers back to them. Slide 9 can go if the room is not going to create spaces themselves.",
+    "**Part 2 — the product (slides 10–21, 4:51–9:38).** Compressible, and this is where the time is. The radar view, the score-explanation panel and the Planner carry the argument; the rest is supporting.",
+    "**Part 3 — architecture and status (slides 22–26, 9:38–12:12).** Slide 25 is the one the room will want to talk about — leave time for it.",
 ], accent=PURPLE, fill="EFE9F6")
 d.pagebreak()
 

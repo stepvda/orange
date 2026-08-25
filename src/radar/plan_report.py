@@ -355,11 +355,29 @@ class PlanReportBuilder:
     # 2 ------------------------------------------------------------- inputs
     def _inputs(self, plan: dict[str, Any]) -> list[Any]:
         s = self.styles
-        story = [Paragraph("The inputs that produced this plan", s["h2"]),
-                 Paragraph("A plan without its inputs is not reproducible. These are the stated "
-                           "constraints; the same values against the same assumption versions "
-                           "produce this plan again, and a test asserts it.", s["small"])]
         inputs = plan.get("inputs") or {}
+        from_workflow = inputs.get("source") == "workflow"
+        story = [Paragraph("The inputs that produced this plan", s["h2"])]
+        if from_workflow:
+            # The reader has to know, before the first figure, that nobody chose
+            # this set here. Everything downstream — why nothing was optimised,
+            # why a pool can be over-committed — follows from that one fact.
+            from .planner import WORKFLOW_STAGE_LABELS
+            stage = inputs.get("from_stage") or "demand_tested"
+            story.append(Paragraph(
+                f"This plan did not select anything. The portfolio is every opportunity space "
+                f"the collaboration workflow has moved to "
+                f"<b>{_text(WORKFLOW_STAGE_LABELS.get(stage, stage))} or beyond</b> — a set of "
+                f"human decisions taken on the workflow board, not an optimiser's output. No "
+                f"confidence floor, distance cap or concentration limit was applied to it, "
+                f"because each would have overruled one of those decisions with an assumption "
+                f"band. What the Planner did is schedule the set across the window and do the "
+                f"arithmetic.", s["small"]))
+        else:
+            story.append(Paragraph(
+                "A plan without its inputs is not reproducible. These are the stated "
+                "constraints; the same values against the same assumption versions "
+                "produce this plan again, and a test asserts it.", s["small"]))
         a = plan.get("assumptions") or {}
         cap, defaults = a.get("capacity") or {}, a.get("defaults") or {}
         # An unset parameter is not an absent one — the planner falls back to
@@ -379,6 +397,7 @@ class PlanReportBuilder:
             "horizon_tolerance": defaults.get("horizon_tolerance"),
         }
         labels = [
+            ("source", "Where the portfolio came from"),
             ("objective", "Objective"),
             ("plan_years", "Plan horizon (years)"),
             ("entry_slots_per_year", "New spaces started per year"),
@@ -412,6 +431,16 @@ class PlanReportBuilder:
                 return f"{value:.0%}"
             return str(value).replace("_", " ")
 
+        if from_workflow:
+            labels = [
+                ("source", "Where the portfolio came from"),
+                ("from_stage", "Included from this stage onward"),
+                ("plan_years", "Plan horizon (years)"),
+                ("entry_slots_per_year", "New spaces started per year"),
+                ("pool_availability", "Capability headcount available for new work"),
+            ]
+            fallback = {k: v for k, v in fallback.items() if k in dict(labels)}
+
         rows = [[Paragraph(h, s["cellhead"]) for h in ("Parameter", "Value", "Source")]]
         for key, label in labels:
             stated = inputs.get(key)
@@ -432,10 +461,20 @@ class PlanReportBuilder:
             f"plan id is a fingerprint of the stated values, so the same request against the same "
             f"assumption versions returns this plan rather than recomputing it.", s["small"]))
 
+        if from_workflow:
+            mix = (plan.get("capacity_usage") or {}).get("stage_mix") or []
+            if mix:
+                story.append(Paragraph(
+                    "Where the committed set stands on the gate: "
+                    + " · ".join(f"{_text(m['label'])} {m['count']}" for m in mix), s["body"]))
+
         binding = (plan.get("capacity_usage") or {}).get("binding") or []
         if binding:
             story.append(Paragraph("What bound this plan", s["h3"]))
             story.append(Paragraph(
+                "The committed set was scheduled, not selected, so these are the limits the "
+                "schedule ran into rather than constraints that removed anything. Nothing was "
+                "dropped to satisfy them." if from_workflow else
                 "These are the constraints the optimiser actually hit. Relaxing one of them is "
                 "what would change the answer; relaxing anything else would not.", s["small"]))
             story.append(Paragraph(
@@ -605,10 +644,16 @@ class PlanReportBuilder:
 
         exclusions = plan.get("exclusions") or []
         if exclusions:
-            story += [Paragraph("Near misses, and the constraint that excluded each", s["h2"]),
-                      Paragraph("As useful as the inclusions, and the thing an optimiser can say "
-                                "that a ranked list cannot: the reason is a constraint, and the "
-                                "constraint is named.", s["small"])]
+            from_workflow = (plan.get("inputs") or {}).get("source") == "workflow"
+            story += [
+                Paragraph("What is not in this plan, and why" if from_workflow else
+                          "Near misses, and the constraint that excluded each", s["h2"]),
+                Paragraph("Nothing here was excluded by the Planner — it excluded nothing. These "
+                          "spaces are waiting for a decision on the workflow board, were stopped "
+                          "there, or carry no market size to project." if from_workflow else
+                          "As useful as the inclusions, and the thing an optimiser can say "
+                          "that a ranked list cannot: the reason is a constraint, and the "
+                          "constraint is named.", s["small"])]
             rows = [[Paragraph(h, s["cellhead"]) for h in ("Space", "Opportunity", "Why not")]]
             for e in exclusions[:14]:
                 rows.append([Paragraph(_text(e["opportunity_id"]), s["cell"]),

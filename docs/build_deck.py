@@ -70,6 +70,15 @@ def figures() -> dict:
         except sqlite3.Error:
             return default
     f["sized"] = maybe("SELECT COUNT(DISTINCT opportunity_id) FROM market_sizes")
+    f["sized_bu"] = maybe("SELECT COUNT(DISTINCT opportunity_id) FROM market_sizes "
+                          "WHERE method='bottom_up_adoption' AND som_base > 0")
+    f["plans"] = maybe("SELECT COUNT(*) FROM plans")
+    f["collateral"] = maybe("SELECT COUNT(*) FROM topic_collateral")
+    f["collateral_kinds"] = maybe("SELECT COUNT(DISTINCT kind) FROM topic_collateral")
+    f["committed"] = maybe("SELECT COUNT(*) FROM workflow_state WHERE stage != 'shortlisted'")
+    f["analyses"] = maybe("SELECT COUNT(DISTINCT opportunity_id) FROM topic_competitor_analysis")
+    f["profiles"] = maybe("SELECT COUNT(*) FROM competitor_profiles")
+    f["pages"] = maybe("SELECT COUNT(*) FROM competitor_pages")
     f["competed"] = maybe("SELECT COUNT(DISTINCT opportunity_id) FROM topic_competition")
     f["briefs"] = maybe("SELECT COUNT(DISTINCT opportunity_id) FROM topic_briefs")
     f["avg_sig"] = round(f["attach"] / max(f["topics"], 1), 1)
@@ -214,7 +223,7 @@ def build():
          size=15, color=RGBColor(0xC3, 0xC2, 0xB7))
     text(s, Inches(1.1), Inches(5.6), Inches(11), Inches(0.4),
          [[("MVP walkthrough", {"color": WHITE, "bold": True}),
-           ("   ·   concepts · functionality · architecture", {"color": MUTED})]], size=13)
+           ("   ·   concepts · functionality · planning · architecture", {"color": MUTED})]], size=13)
     n += 1
 
     # ---- 2. The problem -------------------------------------------------
@@ -351,27 +360,29 @@ def build():
     # ---- 7. Live corpus -------------------------------------------------
     s = blank(prs); y = header(s, "Status", "What the MVP has actually produced",
                                "Every figure below is read from the live database, not typed into this deck.")
-    sw = Inches(2.42)
+    sw = Inches(2.22)
     stats = [
         (F.get("topics"), "opportunity spaces", f"{F.get('verticals')}/15 verticals covered"),
         (f"{F.get('signals', 0):,}", "signals ingested", f"{F.get('relevant', 0):,} passed the gate"),
-        (F.get("sources"), "live sources", "19 of 25 catalogued"),
+        (F.get("sources"), "live sources", "33 enabled + internal intake"),
         (f"{F.get('links', 0):,}", "asset links", f"{F.get('nodes')} graph nodes"),
-        (F.get("avg_sig"), "signals per topic", "evidence depth after enrichment"),
+        (F.get("avg_sig"), "signals per topic", "after enrichment"),
     ]
     for i, (v, l, sub) in enumerate(stats):
         stat(s, Inches(0.75) + (sw + Inches(0.2)) * i, y, sw, v, l, sub)
-    text(s, Inches(0.75), y + Inches(1.75), Inches(11.9), Inches(0.4),
+    text(s, Inches(0.75), y + Inches(1.62), Inches(11.9), Inches(0.4),
          "Coverage of the evidenced grid", size=15, bold=True)
-    bullets(s, Inches(0.75), y + Inches(2.25), Inches(11.5), [
-        (f"{F.get('use_cases')} of 59 use cases and {F.get('techs')} of 38 technologies",
-         "appear in at least one topic — the grid is deliberately sparse; most cells should stay empty."),
+    bullets(s, Inches(0.75), y + Inches(2.08), Inches(11.5), [
+        (f"{F.get('use_cases')} of 59 use cases, {F.get('techs')} of 38 technologies",
+         "appear in at least one topic — the grid is sparse by design."),
         (f"{F.get('tier1', 0):,} tier-1 signals",
          "from regulators, procurement portals, standards bodies and official statistics."),
         (f"{F.get('fr', 0):,} French-language signals",
          "so the anglophone bias named as a principal risk is measured, not assumed."),
-        (f"{F.get('sized', 0)} sized · {F.get('competed', 0)} competition-scored · {F.get('briefs', 0)} with a sales brief",
-         "each carrying its method and confidence, not a quoted headline figure."),
+        (f"{F.get('sized_bu', 0)} sized bottom-up · {F.get('competed', 0)} competition-scored · {F.get('briefs', 0)} briefed",
+         "each with its method and its confidence grade, never a quoted headline."),
+        (f"{F.get('plans', 0)} portfolio plans · {F.get('collateral_kinds', 0)} kinds of pre-sales artefact built",
+         "the two things that turn a ranked list into a decision and a bid."),
     ], size=13.5, gap=0.5)
     footer(s, n := n + 1)
 
@@ -400,8 +411,50 @@ def build():
          "because it may only mean the register has a gap.",
          size=12, color=INK, spacing=1.35)
     caption(s, y + Inches(3.15),
-            "Both are filterable and sortable, because a number the radar computes but cannot be "
-            "sorted on is a number a strategist has to eyeball across a hundred and forty-eight rows.")
+            f"Both are filterable and sortable, because a number the radar computes but cannot be "
+            f"sorted on is a number a strategist has to eyeball across {F.get('topics', 0)} rows.")
+    footer(s, n := n + 1)
+
+
+    # ---- 7c. Two routes into a new space --------------------------------
+    s = blank(prs); y = header(s, "Concept", "Two routes into a new opportunity space",
+                               "A refresh answers the questions the corpus was already asked. These answer the one somebody has right now.")
+    routes = [
+        ("PARAMETERS", "For somebody who knows the taxonomy", BLUE,
+         "Pick a vertical, a use case, a technology, a horizon. Before anything is spent, the screen "
+         "shows the spaces that ALREADY satisfy those criteria — because the most common outcome of an "
+         "on-demand run is rediscovering what the last refresh produced."),
+        ("A SCOPING CONVERSATION", "For somebody who knows their market", ORANGE,
+         "The assistant interviews, with the corpus in front of it. Every turn re-embeds the whole "
+         "transcript against the same signal vectors the run will read, and shows what came back — "
+         "publisher, date and cosine — beside the answer."),
+    ]
+    cw3 = Inches(5.85)
+    for i, (title_, sub, col, body) in enumerate(routes):
+        x = Inches(0.75) + (cw3 + Inches(0.3)) * i
+        rect(s, x, y, cw3, Inches(2.15), fill=LIGHT)
+        rect(s, x, y, cw3, Inches(0.07), fill=col)
+        text(s, x + Inches(0.28), y + Inches(0.3), cw3 - Inches(0.56), Inches(0.3), title_,
+             size=11, color=col, bold=True)
+        text(s, x + Inches(0.28), y + Inches(0.62), cw3 - Inches(0.56), Inches(0.35), sub,
+             size=14, bold=True)
+        text(s, x + Inches(0.28), y + Inches(1.08), cw3 - Inches(0.56), Inches(1.0), body,
+             size=11.5, color=MUTED, spacing=1.32)
+    rect(s, Inches(0.75), y + Inches(2.3), Inches(11.9), Inches(1.5), fill=INK)
+    text(s, Inches(1.05), y + Inches(2.52), Inches(11.3), Inches(0.3),
+         "BOTH ARE REFUSED BY THE SAME GATE, AND THE CORPUS HOLDS IT — NOT THE MODEL",
+         size=10.5, color=ORANGE, bold=True)
+    text(s, Inches(1.05), y + Inches(2.9), Inches(5.4), Inches(0.8),
+         "A brief must retrieve at least the run's own floor of signals, using the run's own retrieval. "
+         "Asked \u201cdo you have enough?\u201d a model says yes, so the button is enabled by what came back.",
+         size=11, color=RGBColor(0xC3, 0xC2, 0xB7), spacing=1.3)
+    text(s, Inches(6.9), y + Inches(2.9), Inches(5.5), Inches(0.8),
+         "And similarity is not support. A second, independent reason is required — on the use case or "
+         "the technology, never the vertical, which corroborates every brief ever written about a "
+         "well-covered sector.", size=11, color=RGBColor(0xC3, 0xC2, 0xB7), spacing=1.3)
+    caption(s, y + Inches(3.95),
+            "Municipal digital signage retrieves French tenders at the same 0.64 cosine a well-evidenced "
+            "brief scores — so the gate judges the brief's own sentence, not the taxonomy labels it was filed under.")
     footer(s, n := n + 1)
 
     # ---- 8-14. Functionality --------------------------------------------
@@ -423,12 +476,24 @@ def build():
          "claim linked to its signals, where it delivers value and for whom, can-we-play/can-we-win "
          "itemised against named Orange assets, the score breakdown expanded, and the next action for "
          "the current role."),
+        ("fs_space", "One space, full screen",
+         "Four tabs, in the order the questions arrive",
+         "The three-pane layout is right for working THROUGH the radar — filter, scan, open, compare, "
+         "move on. It is wrong for the moment somebody reads a space. So the same content opens with "
+         "the panes out of the way, in four tabs: the space, the competitors, the sales brief, and the "
+         "pre-sales pack. What is this, who else is here, what do I send, what comes after the meeting."),
         ("explain", "How this score was calculated",
          "Explainability made checkable rather than asserted",
          "Every component shows the stored inputs and the arithmetic: publisher entropy and the "
          "publishers counted, the tier distribution, the per-period buckets the momentum slope was "
          "fitted to, the rubric level and its rationale. A reviewer outside the project can reconstruct "
          "why any topic holds its rank."),
+        ("fs_presales", "Pre-sales collateral",
+         "Twelve pieces, in the format each reader works in",
+         "The brief is one document for one conversation. This is what the team needs between that "
+         "conversation and a proposal. All twelve are listed whether or not anything has been built, "
+         "because what COULD be produced is as much of the answer as what has been — and a screen that "
+         "starts empty is one nobody presses a button on."),
         ("workflow", "Stage gate and role assessment",
          "Shortlisted → Demand-tested → Packaged → Live",
          "Ownership follows the stage, and stalled cards are flagged because latency is the known "
@@ -440,6 +505,24 @@ def build():
          "evidence is polarity, so diverging with a neutral midpoint — agreement reads as nothing. "
          "The stage funnel is an ordered sequence, so ordinal. Only the signal-type mix is categorical, "
          "and it ships a legend and a table."),
+        ("generate_chat", "Generating a space on demand",
+         "The screen opens with a conversation, not a text box",
+         "The box asked for one thing and gave one piece of feedback — a character count, the only "
+         "failure that did not matter. Somebody who knows their market but not this taxonomy "
+         "under-specified two of five dimensions every time, and found out minutes later from a run "
+         "that created nothing. The assistant interviews instead, and shows what each turn retrieved."),
+        ("planner_overview", "The Planner",
+         "Which SET, in what order, and what it earns",
+         "A ranked list assumes you can take the top N, and you cannot. A mixed-integer program "
+         "maximises the stated objective under entry slots, capability headcount, concentration caps "
+         "and a horizon mix — then reports WHICH CONSTRAINT BOUND IT, which is the thing a ranked list "
+         "cannot tell you, because the answer is a constraint rather than a score."),
+        ("plannerwf_narrative", "The plan the business already chose",
+         "Workflow selected: the stage gate decides, the Planner only schedules",
+         "Every space the board has moved to Demand-tested or beyond is in, and none of the "
+         "constraints is applied — each would overrule a decision somebody already took. Nothing is "
+         "dropped to make it fit: where the committed set needs more than the pools can staff, the "
+         "plan says so and by how much. That gap is the finding, not a reason to edit the portfolio."),
         ("help", "Contextual help",
          "Every dense concept explains itself",
          "Portfolio distance, conviction, divergence, evidence gaps, source tiers, horizons, the "
@@ -474,37 +557,59 @@ def build():
     for i, (name, mod, io) in enumerate(stages):
         x = Inches(0.75) + (bw2 + Inches(0.05)) * i
         dark = name.startswith(("5", "6"))
-        rect(s, x, y, bw2, Inches(1.55), fill=INK if dark else LIGHT)
+        rect(s, x, y, bw2, Inches(1.45), fill=INK if dark else LIGHT)
         text(s, x + Inches(0.12), y + Inches(0.16), bw2 - Inches(0.24), Inches(0.4), name,
              size=11.5, bold=True, color=WHITE if dark else INK)
         text(s, x + Inches(0.12), y + Inches(0.58), bw2 - Inches(0.24), Inches(0.3), mod,
              size=9, color=ORANGE, font=MONO)
         text(s, x + Inches(0.12), y + Inches(0.86), bw2 - Inches(0.24), Inches(0.6), io,
              size=9, color=RGBColor(0xC3, 0xC2, 0xB7) if dark else MUTED, spacing=1.2)
-    text(s, Inches(0.75), y + Inches(1.95), Inches(11.9), Inches(0.4),
+    text(s, Inches(0.75), y + Inches(1.72), Inches(11.9), Inches(0.4),
          "A parallel, slower path maintains the Orange Business Graph", size=15, bold=True)
-    text(s, Inches(0.75), y + Inches(2.35), Inches(11.9), Inches(0.9),
+    text(s, Inches(0.75), y + Inches(2.08), Inches(11.9), Inches(0.7),
          "Offers, references, partners with tiers, certifications, analyst positions, capability pools "
          "and research assets. It joins at stage 6, so right-to-win can be improved without re-running "
          "discovery. Links are typed L0–L4 and carry the evidence that justified them.",
-         size=12.5, color=MUTED, spacing=1.35)
-    caption(s, y + Inches(3.5),
-            "Collection runs in parallel — twelve sources in about forty-five seconds — while database "
-            "writes stay serial, because deduplication is a read-modify-write over the whole signal table.")
+         size=12.5, color=MUTED, spacing=1.32)
+    text(s, Inches(0.75), y + Inches(2.76), Inches(11.9), Inches(0.4),
+         "And two subsystems sit BESIDE the pipeline rather than in it", size=15, bold=True)
+    subs = [
+        ("THE PLANNER", "planner.py · plan_report.py",
+         "Reads the read model and an assumptions file. Selects a set, schedules it, projects five "
+         "years, writes one PDF. One model call, after every number is fixed."),
+        ("PRE-SALES COLLATERAL", "presales/",
+         "Reads ONE snapshot of a space and emits twelve artefacts in five formats — so nothing in a "
+         "pack can disagree with anything else in it."),
+    ]
+    for i, (title_, mod, body) in enumerate(subs):
+        x = Inches(0.75) + Inches(6.1) * i
+        rect(s, x, y + Inches(3.1), Inches(5.8), Inches(1.32), fill=LIGHT)
+        text(s, x + Inches(0.24), y + Inches(3.27), Inches(5.3), Inches(0.3), title_,
+             size=10.5, color=ORANGE, bold=True)
+        text(s, x + Inches(0.24), y + Inches(3.55), Inches(5.3), Inches(0.25), mod,
+             size=9, color=MUTED, font=MONO)
+        text(s, x + Inches(0.24), y + Inches(3.81), Inches(5.3), Inches(0.7), body,
+             size=10.5, color=MUTED, spacing=1.28)
     footer(s, n := n + 1)
 
     # ---- 16. Architecture: stack ----------------------------------------
     s = blank(prs); y = header(s, "Architecture", "Stack and separation of concerns")
     cols = [
-        ("INGESTION", ["19 connectors: TED, BOAMP, UK Contracts,", "EUR-Lex SPARQL, Have-your-say, GDELT,",
-                       "news RSS (EN/FR), Hacker News, OpenAlex,", "Crossref, arXiv, CORDIS, NIST, CERT-FR",
-                       "", "Parallel fetch · circuit breaker ·", "per-host pacing · replay-safe dates"]),
+        ("INGESTION", ["33 enabled sources across 17 connector", "types: TED, BOAMP, UK Contracts,",
+                       "EUR-Lex SPARQL, Have-your-say, GDELT,", "news RSS (EN/FR), Hacker News, OpenAlex,",
+                       "Crossref, arXiv, CORDIS, NIST, CERT-FR", "",
+                       "Parallel fetch · circuit breaker ·", "per-host pacing · replay-safe dates"]),
         ("INTELLIGENCE", ["DeepSeek behind a provider-agnostic", "client (swap to Ollama via .env alone)",
                           "", "Local sentence-transformers for", "embeddings and clustering",
                           "", "Deterministic where possible,", "generative only where it earns its place"]),
         ("SERVING", ["SQLite — the graph is thousands of", "nodes, not millions",
-                     "", "FastAPI read API", "", "React + Vite + TypeScript",
-                     "Hand-drawn SVG radar, no chart library"]),
+                     "", "FastAPI read API behind a session", "guard applied to the whole app,",
+                     "not route by route",
+                     "", "React + Vite + TypeScript",
+                     "Hand-drawn SVG radar, no chart library",
+                     "", "scipy milp for portfolio selection",
+                     "reportlab / python-pptx / python-docx",
+                     "for every document it emits"]),
     ]
     cw2 = Inches(3.85)
     for i, (title_, lines) in enumerate(cols):
@@ -550,17 +655,21 @@ def build():
         ("Learned scoring models", "no labels exist on day one; the capture and replay harness ships instead"),
         ("Patent connector", "needs EPO registration; technology ownership uses a portfolio-level prior"),
         ("Learned ranking per role", "needs 300-600 expert comparisons; the capture widget ships first"),
-    ], size=12.5, gap=0.62)
+        ("ROI on a plan", "there is no cost data at the granularity a space needs, anywhere the pipeline can reach"),
+        ("Per-role authorisation", "sign-in answers WHO; it does not yet answer MAY THEY"),
+    ], size=12.5, gap=0.55)
     text(s, Inches(7.0), y, Inches(5.6), Inches(0.3), "NEEDS A DECISION FROM ORANGE", size=11, color=RED, bold=True)
     bullets(s, Inches(7.0), y + Inches(0.42), Inches(5.4), [
-        ("Who is the curator?", "2,007 links are machine-proposed and unconfirmed"),
-        ("No agriculture vertical", "agri topics are being forced into four other verticals"),
-        ("Terms of use", "unconfirmed for ten enabled sources — a Sprint 0 blocker"),
+        ("Who is the curator?", f"{F.get('links', 0):,} links are machine-proposed and unconfirmed"),
+        ("Margin by portfolio distance", "one table from Orange finance moves five-year profit by 1.66x"),
+        ("Headcount free for new work", "the constraint that binds first in most plans is currently a guess"),
+        ("Terms of use", "unconfirmed for several enabled sources — a Sprint 0 blocker"),
         ("Refresh cadence", "drives connector design and cost more than any other choice"),
-    ], size=12.5, gap=0.62)
-    caption(s, y + Inches(3.15),
+    ], size=12.5, gap=0.55)
+    caption(s, y + Inches(3.35),
             "The radar reports its own gaps rather than hiding them: evidence-gap warnings, language "
-            "coverage, unconfirmed links and skipped sources are all surfaced in the interface.")
+            "coverage, unconfirmed links, skipped sources, unsized spaces and an over-committed "
+            "capability pool are all surfaced in the interface rather than left to be discovered.")
     footer(s, n := n + 1)
 
     # ---- 19. Close ------------------------------------------------------
@@ -577,6 +686,10 @@ def build():
          f"{F.get('topics')} opportunity spaces  ·  {F.get('signals', 0):,} signals  ·  "
          f"{F.get('sources')} live sources  ·  {F.get('links', 0):,} named asset links",
          size=13, color=ORANGE, font=MONO)
+    text(s, Inches(1.1), Inches(5.5), Inches(11), Inches(0.4),
+         f"{F.get('sized_bu', 0)} sized bottom-up  ·  {F.get('briefs', 0)} sales briefs  ·  "
+         f"12 pre-sales artefacts per space  ·  {F.get('plans', 0)} portfolio plans",
+         size=13, color=MUTED, font=MONO)
     n += 1
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
