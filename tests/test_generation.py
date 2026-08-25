@@ -20,7 +20,7 @@ from radar.config import get_config
 from radar.db import Database, js
 from radar.generation import MAX_PER_RUN, GenerationJob, GenerationService
 from radar.embeddings import Embedder
-from radar.llm import LLMClient
+from radar.llm import LLMClient, LLMError
 from radar.readmodel import ReadModel, refresh_kind, topic_for_list
 from radar.pipeline.synthesis import (GenerationConstraints, Candidate, SynthesisProgress,
                                       SynthesisStats, Synthesiser)
@@ -582,6 +582,51 @@ def test_two_runs_cannot_proceed_at_once(cfg, db):
             service.start(1, GenerationConstraints())
     finally:
         _await(job)
+
+
+def test_the_run_says_which_calls_failed_and_stops_calling_it_evidence(cfg, db):
+    """The failure that made generation look broken for a day.
+
+    Synthesis treats a failed model call like a cluster with nothing to say: it
+    logs and returns no candidates. Right for one flaky call, catastrophic for a
+    provider that cannot be reached — the run reads every cluster, creates
+    nothing, and concludes "the evidence in scope did not support more", which
+    is an evidence verdict from a run that never reached the model. On the day
+    this was written the cause was a wedged DNS resolver, and the screen blamed
+    the corpus for it.
+
+    Unit-level, because the service builds its client inside its own thread.
+    """
+    from radar.pipeline.synthesis import Synthesiser as _S
+    service = GenerationService(cfg, db)
+    job = GenerationJob(id="G-x", requested=3, constraints=GenerationConstraints())
+    synth = _S(cfg, db, LLMClient(provider="mock"))
+    synth.llm_failures, synth.llm_successes = 7, 0
+    synth.last_llm_error = "APIConnectionError: Connection error."
+    service._report_provider(job, synth)
+    said = " ".join(e["message"] for e in job.log)
+    assert "EVERY model call failed" in said
+    assert "never reached the model" in said
+    assert "Connection error" in said
+
+    stats = SynthesisStats(raw_candidates=0)
+    service._report_shortfall(job, stats)
+    closing = job.log[-1]["message"]
+    assert "says nothing about the evidence" in closing
+    assert "did not support more" not in closing, "no evidence verdict from a run that never ran"
+
+
+def test_a_partial_provider_failure_is_a_floor_not_a_verdict(cfg, db):
+    service = GenerationService(cfg, db)
+    job = GenerationJob(id="G-y", requested=5, constraints=GenerationConstraints())
+    from radar.pipeline.synthesis import Synthesiser as _S
+    synth = _S(cfg, db, LLMClient(provider="mock"))
+    synth.llm_failures, synth.llm_successes = 3, 9
+    synth.last_llm_error = "APITimeoutError: timed out"
+    service._report_provider(job, synth)
+    said = job.log[-1]["message"]
+    assert "3 of 12 model calls failed" in said
+    assert "floor rather than a verdict" in said
 
 
 def test_a_shortfall_is_explained_rather_than_left_as_a_number(cfg, db):

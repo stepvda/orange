@@ -293,6 +293,13 @@ class SynthesisStats:
 
 
 class Synthesiser:
+    #: Model calls that never returned, and the last reason. A run whose passes
+    #: all fail has not learned anything about the corpus, and must not report
+    #: an evidence verdict — see `_generate`.
+    llm_failures: int
+    llm_successes: int
+    last_llm_error: str | None
+
     def __init__(self, cfg: Config, db: Database, llm: LLMClient, embedder: Embedder | None = None,
                  constraints: GenerationConstraints | None = None):
         self.cfg = cfg
@@ -300,6 +307,10 @@ class Synthesiser:
         self.llm = llm
         self.embedder = embedder or Embedder()
         self.constraints = constraints or GenerationConstraints()
+        self.llm_failures = 0
+        self.llm_successes = 0
+        self.last_llm_error: str | None = None
+        self._fail_lock = threading.Lock()
         cur = cfg.settings["curation"]
         self.min_chars = int(cur["statement_min_chars"])
         self.max_chars = int(cur["statement_max_chars"])
@@ -1067,8 +1078,22 @@ class Synthesiser:
                     system, user, strong=True, temperature=self.temperature, max_tokens=4000
                 )
             except Exception as exc:  # noqa: BLE001
-                log.warning("Synthesis pass %d failed for cluster %s: %s", index, payload["cluster_id"], exc)
+                # A swallowed provider failure is indistinguishable from a
+                # cluster that had nothing to say, and the two need completely
+                # different answers. Left as a bare log line, an unreachable
+                # model produced a run that read every cluster, created nothing,
+                # and reported "the evidence in scope did not support more" —
+                # blaming the corpus for a network fault, which is the most
+                # misleading thing this pipeline can say. Counted here so the
+                # run can tell the difference.
+                log.warning("Synthesis pass %d failed for cluster %s: %s", index,
+                            payload["cluster_id"], exc)
+                with self._fail_lock:
+                    self.llm_failures += 1
+                    self.last_llm_error = f"{type(exc).__name__}: {exc}"
                 return []
+            with self._fail_lock:
+                self.llm_successes += 1
             return self._parse(data)
 
         out: list[Candidate] = []

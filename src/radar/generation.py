@@ -504,6 +504,7 @@ class GenerationService:
             job.created_ids = list(stats.created_ids)
             job.updated_ids = list(dict.fromkeys(stats.updated_ids))
             job.stats["synthesis"] = stats.as_dict()
+            self._report_provider(job, synth)
             job.stages_done.append("synthesise")
             job.say(
                 f"Synthesis finished after {stats.rounds} round(s): {len(job.created_ids)} new space(s), "
@@ -633,6 +634,41 @@ class GenerationService:
 
     # -- reporting helpers ---------------------------------------------------
 
+    def _report_provider(self, job: GenerationJob, synth: Synthesiser) -> None:
+        """Say when the model, not the corpus, is what came up empty.
+
+        Synthesis treats a failed model call as a cluster with nothing to say —
+        it logs and returns no candidates, which is right for one flaky call and
+        catastrophic for a provider that is down. A run then reads every cluster,
+        creates nothing, and reports "the evidence in scope did not support
+        more": an evidence verdict from a run that never reached the model.
+
+        That is worth being loud about. It is the difference between "the radar
+        has nothing here" — which is a finding — and "this machine could not
+        reach the model", which is a broken tool.
+        """
+        failures = getattr(synth, "llm_failures", 0)
+        if not failures:
+            return
+        successes = getattr(synth, "llm_successes", 0)
+        job.stats["llm_failures"] = failures
+        job.stats["llm_last_error"] = synth.last_llm_error
+        total = failures + successes
+        if successes == 0:
+            job.say(
+                f"EVERY model call failed ({failures} of {total}). Nothing here is a statement "
+                f"about the corpus — the run never reached the model. Last error: "
+                f"{synth.last_llm_error}. Check the provider, the API key and this machine's "
+                f"network before reading anything below as an evidence verdict."
+            )
+        else:
+            job.say(
+                f"{failures} of {total} model calls failed and were skipped (last: "
+                f"{synth.last_llm_error}). Those clusters produced nothing for reasons that have "
+                f"nothing to do with what they contain, so the count below is a floor rather than "
+                f"a verdict."
+            )
+
     def _report_shortfall(self, job: GenerationJob, stats) -> None:
         """Say why the run fell short, if it did (§4.12).
 
@@ -677,10 +713,15 @@ class GenerationService:
         if stats.updated_ids:
             reasons.append(f"{len(set(stats.updated_ids))} matched an existing space and refreshed it "
                            f"instead of creating a new one (DR-03)")
+        # The closing sentence is an evidence verdict, so it may only be said by
+        # a run that actually consulted the evidence.
+        reached_the_model = job.stats.get("llm_failures", 0) == 0 or stats.raw_candidates > 0
         job.say(
             f"Asked for {job.requested}, created {created}. Of {stats.raw_candidates} raw candidate(s): "
             + ("; ".join(reasons) if reasons else "no candidate cleared curation")
-            + ". The evidence in scope did not support more — that is an answer, not a failure."
+            + (". The evidence in scope did not support more — that is an answer, not a failure."
+               if reached_the_model else
+               ". This run could not reach the model, so it says nothing about the evidence.")
         )
 
     def _horizon_landing(self, job: GenerationJob) -> dict[str, int]:
