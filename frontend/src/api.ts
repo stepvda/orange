@@ -5,7 +5,7 @@ import type {
   Plan, PlannerMeta, PlanRequest, PlanReport, PlanReportStatus,
   GenerationMatch, GenerationOptions, MarketSize, Meta, RadarView, SessionInfo, Topic,
   TopicDescription, User,
-  ChatMessage, HypothesisRequest, ScopingOpening, ScopingTurn,
+  ChatMessage, GenerateAnywayRequest, HypothesisRequest, ScopingOpening, ScopingTurn,
 } from './types'
 
 const BASE = '/api'
@@ -314,6 +314,12 @@ export const api = {
    *  than on nothing, and scores like the hypothesis it is. */
   startGenerationFromHypothesis: (body: HypothesisRequest) =>
     post<GenerationJob & { internal_signal_id: string }>('/generate/hypothesis', body),
+
+  /** Generate regardless of what the corpus holds today: the run searches for
+   *  evidence on the brief first, and cites the person's own account where they
+   *  gave one. Synthesis is unchanged — claims still have to cite something. */
+  startGenerationAnyway: (body: GenerateAnywayRequest) =>
+    post<GenerationJob & { internal_signal_id: string | null }>('/generate/anyway', body),
 
   scopingOpening: () => get<ScopingOpening>('/generate/chat'),
 

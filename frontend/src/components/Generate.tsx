@@ -3,8 +3,8 @@ import { api } from '../api'
 import { HelpButton } from './Help'
 import BriefChat from './BriefChat'
 import type {
-  GenerationConstraints, GenerationJob, GenerationMatch, GenerationOptions, HypothesisRequest,
-  Meta, Topic,
+  GenerateAnywayRequest, GenerationConstraints, GenerationJob, GenerationMatch,
+  GenerationOptions, HypothesisRequest, Meta, Topic,
 } from '../types'
 import { EMPTY_CONSTRAINTS, constraintCount } from '../types'
 
@@ -263,6 +263,20 @@ function RunReport({ job, onCancel, onOpenTopic }: {
             )}
             {' · asked for '}{job.requested}.
           </p>
+          {job.updated_ids.length > 0 && (
+            <div className="gen-created-ids">
+              <span className="gen-quiet">
+                {job.created === 0
+                  ? 'Nothing new was created because what the run produced already exists here. '
+                    + 'Your evidence was added to it — open it and see:'
+                  : 'Also refreshed with this run\'s evidence:'}
+              </span>
+              {job.updated_ids.map((id) => (
+                <button key={id} type="button" className="gen-created-chip"
+                        onClick={() => onOpenTopic(id)}>{id}</button>
+              ))}
+            </div>
+          )}
           {job.created_topics.length > 0 && (
             <div className="gen-created">
               {job.created_topics.map((topic) => (
@@ -455,6 +469,19 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
       .finally(() => setStarting(false))
   }, [])
 
+  /** Build it regardless. The run goes and looks for evidence on the brief and
+   *  carries the person's own account where they gave one — so the space still
+   *  cites something, it is just no longer limited to what the crawl happened
+   *  to have fetched before today. */
+  const startAnyway = useCallback((body: GenerateAnywayRequest) => {
+    setStarting(true)
+    setError(null)
+    api.startGenerationAnyway(body)
+      .then((started) => { setJob(started); notified.current = null })
+      .catch((e) => setError(String(e).replace(/^Error:\s*/, '')))
+      .finally(() => setStarting(false))
+  }, [])
+
   const cancel = useCallback(() => {
     if (!job) return
     api.cancelGeneration(job.id).then(setJob).catch((e) => setError(String(e)))
@@ -547,6 +574,7 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
               blocked={blocked}
               onGenerate={startFromBriefs}
               onHypothesis={startFromHypothesis}
+              onAnyway={startAnyway}
               onOpenTopic={onOpenTopic}
             />
           </section>

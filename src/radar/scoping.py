@@ -242,6 +242,12 @@ class ScopingService:
         # resolves the vertical, the use case and the technology and then offers
         # nothing reads as a refusal for no stated reason, and the person has
         # nowhere to click. So the server composes one from what it has.
+        # Deliberately NOT inferred from the transcript by matching vocabulary
+        # terms against it. That was tried: "large TV screens in public spaces"
+        # resolved the vertical to `aerospace_defense`, because "public spaces"
+        # contains a synonym for aerospace, and a municipal signage idea filed
+        # under defence is a worse outcome than one more question. The model
+        # reads the conversation; substring matching reads the letters.
         if not briefs and all(understood.get(k) for k in ("vertical", "use_case", "technology")):
             briefs = self._check_briefs(synth, [self._compose_brief(understood, transcript)])
         # THE CORPUS DECIDES, IN BOTH DIRECTIONS. The model's flag is a

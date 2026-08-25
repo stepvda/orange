@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import type {
-  ChatMessage, GenerationOptions, HypothesisRequest, Meta, ScopingBrief, ScopingOpening,
-  ScopingSignal, ScopingTurn,
+  ChatMessage, GenerateAnywayRequest, GenerationOptions, HypothesisRequest, Meta, ScopingBrief,
+  ScopingOpening, ScopingSignal, ScopingTurn,
 } from '../types'
 import { HYPOTHESIS_KINDS } from '../types'
 
@@ -46,6 +46,9 @@ interface Props {
   /** Generation is impossible in this deployment at all (no encoder, no clusters). */
   blocked: boolean
   onGenerate: (descriptions: string[]) => void
+  /** Build it regardless of what the corpus holds: search for evidence on the
+   *  brief, and carry the person's own account where they have given one. */
+  onAnyway: (body: GenerateAnywayRequest) => void
   /** Build a space the corpus is silent about, on contributed evidence. */
   onHypothesis: (body: HypothesisRequest) => void
   onOpenTopic: (id: string) => void
@@ -237,13 +240,12 @@ function BriefCard({ brief, index, text, selected, onText, onToggle, onOpenTopic
   const length = text.trim().length
   const tooShort = length < min
   return (
-    <div className={`chat-brief${selected ? ' is-on' : ''}${brief.runnable ? '' : ' is-blocked'}`}>
+    <div className={`chat-brief${selected ? ' is-on' : ''}`}>
       <div className="chat-brief-head">
         <label className="chat-brief-pick">
           <input
             type="checkbox"
             checked={selected}
-            disabled={!brief.runnable}
             onChange={onToggle}
           />
           <span>{brief.title || `Space ${index + 1}`}</span>
@@ -387,7 +389,7 @@ function Understood({ turn, label }: {
 }
 
 export default function BriefChat({
-  meta, options, active, starting, blocked, onGenerate, onHypothesis, onOpenTopic,
+  meta, options, active, starting, blocked, onGenerate, onHypothesis, onAnyway, onOpenTopic,
 }: Props) {
   const [opening, setOpening] = useState<ScopingOpening | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -433,9 +435,11 @@ export default function BriefChat({
         // A new set of proposals invalidates edits and selections made against
         // the previous one — index 1 is a different brief now.
         setEdits({})
-        setPicked(Object.fromEntries(
-          answer.briefs.map((brief, index) => [index, brief.runnable]),
-        ))
+        // Every proposed brief starts selected. Defaulting to `runnable` meant a
+        // brief the corpus cannot evidence arrived unticked AND unticka-ble, so
+        // the button had nothing selected and stayed dead — which is what the
+        // greyed-out Generate actually was.
+        setPicked(Object.fromEntries(answer.briefs.map((_, index) => [index, true])))
       })
       .catch((e) => {
         setError(String(e).replace(/^Error:\s*/, ''))
@@ -456,15 +460,19 @@ export default function BriefChat({
   )
   const min = opening?.min_brief_chars ?? 40
 
-  const selected = useMemo(
+  /** Briefs with enough text to run, whether or not the corpus can evidence
+   *  them. The corpus decides which ROUTE a brief takes, not whether the button
+   *  works — "we have not fetched anything about this yet" was never a good
+   *  reason to refuse to build it. */
+  const runnableNow = useMemo(
     () => briefs
       .map((brief, index) => ({ brief, index }))
-      .filter(({ brief, index }) => brief.runnable && picked[index]
-        && textFor(index).trim().length >= min),
+      .filter(({ index }) => picked[index] && textFor(index).trim().length >= min),
     [briefs, picked, textFor, min],
   )
-
-  const canGenerate = Boolean(turn?.ready) && selected.length > 0 && !active && !starting && !blocked
+  const canGenerate = runnableNow.length > 0 && !active && !starting && !blocked
+  /** Nothing here is corpus-backed, so pressing Generate will go and look. */
+  const willResearch = runnableNow.length > 0 && !turn?.ready
 
   const suggestions = turn?.suggestions ?? opening?.suggestions ?? []
 
@@ -634,22 +642,39 @@ export default function BriefChat({
             </h3>
             <span className="spacer" />
             <button className="gen-go" disabled={!canGenerate}
-                    onClick={() => onGenerate(selected.map(({ index }) => textFor(index).trim()))}>
+                    onClick={() => {
+                      if (willResearch) {
+                        const { brief, index } = runnableNow[0]
+                        onAnyway({
+                          description: textFor(index).trim(),
+                          rationale: brief.hypothesis_rationale || null,
+                          vertical: brief.vertical,
+                          geographies: brief.geographies,
+                          research: true,
+                        })
+                      } else {
+                        onGenerate(runnableNow.map(({ index }) => textFor(index).trim()))
+                      }
+                    }}>
               {active ? <><span className="spinner" /> Generating…</>
                 : starting ? 'Starting…'
-                : `Generate ${selected.length || ''} space${selected.length === 1 ? '' : 's'}`.trim()}
+                : willResearch ? 'Research it and generate'
+                : `Generate ${runnableNow.length || ''} space${runnableNow.length === 1 ? '' : 's'}`.trim()}
             </button>
           </div>
           {/* The greyed button at the top is correct here and reads as a dead
               end anyway: the action that works is inside the card below, and
               somebody looking at a disabled Generate concludes the screen still
               refuses them. Say where to go. */}
-          {briefs.some((b) => !b.runnable && b.hypothesis) && !canGenerate && (
-            <p className="gen-blocked">
-              <b>Generate is off because the corpus cannot evidence this — not because you cannot
-              build it.</b> Nobody has published about it yet, which is what makes it new. Use{' '}
-              <b>“Build it on what I know”</b> on the brief below: what you tell it is recorded as
-              dated, attributable evidence under your name, and the space is built on that.
+          {willResearch && (
+            <p className="gen-note">
+              <b>The radar has not fetched anything about this yet, so Generate will go and
+              look.</b> The corpus is a crawl driven by the taxonomy, and an idea outside that grid
+              is missing from it for reasons that say nothing about whether the world has written
+              about it. The run searches the news and research indexes for this brief, puts what it
+              finds through the same relevance gate as everything else, and carries your own
+              account alongside it. Every claim in the resulting space still has to cite something
+              dated and attributable — that part does not bend.
             </p>
           )}
           <p className="gen-note">

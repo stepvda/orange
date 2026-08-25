@@ -629,6 +629,17 @@ export const HYPOTHESIS_KINDS = [
   { id: 'lost_deal', label: 'A deal we lost', becomes: 'market move' },
 ] as const
 
+/** Build the space whatever the corpus says: search for evidence first, and
+ *  carry the person's own account if they have one. */
+export interface GenerateAnywayRequest {
+  description: string
+  rationale?: string | null
+  kind?: string
+  vertical?: string | null
+  geographies?: string[]
+  research?: boolean
+}
+
 export interface HypothesisRequest {
   description: string
   rationale: string

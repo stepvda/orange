@@ -646,7 +646,9 @@ def test_the_payload_names_every_stage_and_which_ones_finished(cfg, db):
     service = GenerationService(cfg, db)
     job = _await(service.start(1, GenerationConstraints(verticals=("manufacturing",))))
     payload = job.as_dict()
-    assert [s["id"] for s in payload["stages"]][0] == "synthesise"
+    stages = [s["id"] for s in payload["stages"]]
+    assert stages[0] == "synthesise", "a grid run does not collect, so it lists no research stage"
+    assert "research" not in stages
     assert payload["constrained"] is True
     assert payload["constraints"]["verticals"] == ["manufacturing"]
 
@@ -657,6 +659,26 @@ def test_the_payload_names_every_stage_and_which_ones_finished(cfg, db):
 
 def _job(requested: int = 4) -> GenerationJob:
     return GenerationJob(id="G-test", requested=requested, constraints=GenerationConstraints())
+
+
+def test_a_researching_run_lists_the_stage_it_will_actually_do(cfg, db):
+    """The other half: a run that goes and looks must say so, because collecting
+    is the one thing NFR-04 promises a generation run does not do."""
+    job = GenerationJob(id="G-r", requested=1, constraints=GenerationConstraints(),
+                        kind="brief", briefs=["x" * 60], research=True)
+    payload = job.as_dict()
+    assert [s["id"] for s in payload["stages"]][0] == "research"
+    assert payload["research"] is True
+
+
+def test_research_does_not_count_toward_the_finishing_stages(cfg, db):
+    """It is a prelude. Counted among the six that take the bar the last stretch,
+    a researched run would sit one seventh short of done for ever."""
+    job = GenerationJob(id="G-r2", requested=1, constraints=GenerationConstraints(),
+                        kind="brief", briefs=["x" * 60], research=True)
+    job.stages_done = ["research", "synthesise", "enrich", "link", "score",
+                       "actions", "size", "competition"]
+    assert job.progress == 1.0
 
 
 def test_progress_starts_at_nothing(cfg, db):

@@ -49,6 +49,7 @@ from .graph import Linker
 from .llm import LLMClient
 from .pipeline.actions import NextActionGenerator
 from .pipeline.enrich import Enricher
+from . import scouting
 from .pipeline.synthesis import (GenerationConstraints, SynthesisProgress, SynthesisStats,
                                 Synthesiser)
 from .scoring import ScoringEngine
@@ -94,6 +95,7 @@ HISTORY_LIMIT = 20
 #: generates it on demand (FR-14), and making it part of every run would double
 #: the cost of the cheap case to serve the occasional one.
 STAGE_LABELS: tuple[tuple[str, str], ...] = (
+    ("research", "Searching for new evidence"),
     ("synthesise", "Synthesising candidates"),
     ("enrich", "Attaching corroborating evidence"),
     ("link", "Linking to the Orange Business Graph"),
@@ -120,6 +122,13 @@ class GenerationJob:
     #: several genuinely distinct taxonomy triples in one sitting, and running
     #: them separately would mean three trips through the single-run guard.
     briefs: list[str] = field(default_factory=list)
+    #: Go and look before synthesising. A departure from NFR-04's "collected
+    #: nothing new", taken deliberately and only when asked: the corpus is a
+    #: taxonomy-driven crawl, so an idea outside the query grid is missing from
+    #: it for reasons that say nothing about whether the world has written about
+    #: it. What is collected goes through the ordinary gate and is recorded
+    #: against this run, so the departure is traceable rather than silent.
+    research: bool = False
     status: str = "queued"          # queued | running | done | error | cancelled
     stage: str | None = None
     stages_done: list[str] = field(default_factory=list)
@@ -188,7 +197,10 @@ class GenerationJob:
         """
         if self.status in ("done", "error", "cancelled"):
             return 1.0
-        finishing = [key for key, _ in STAGE_LABELS if key != "synthesise"]
+        # `research` is a PRELUDE, not a finishing stage: it runs before
+        # synthesis, so counting it among the stages that take the bar the last
+        # 28% would park a researched run one seventh short of done forever.
+        finishing = [key for key, _ in STAGE_LABELS if key not in ("synthesise", "research")]
         completed = sum(1 for key in finishing if key in self.stages_done)
         if "synthesise" not in self.stages_done:
             by_created = len(self.created_ids) / self.requested if self.requested else 0.0
@@ -205,6 +217,7 @@ class GenerationJob:
             "progress": self.progress,
             "round": self.round,
             "kind": self.kind,
+            "research": self.research,
             # `brief` stays singular for the one-brief case the screen has
             # always shown; `briefs` is the truth. A run answering three of them
             # has no single brief to name, and naming the first would read as if
@@ -222,8 +235,12 @@ class GenerationJob:
             "status": self.status,
             "stage": self.stage,
             "stage_label": dict(STAGE_LABELS).get(self.stage or "", self.stage),
+            # `research` is listed only by a run that will actually do it.
+            # A grid run showing a stage it never reaches reads as a run that
+            # stalled before it started.
             "stages": [{"id": key, "label": label, "done": key in self.stages_done}
-                       for key, label in STAGE_LABELS],
+                       for key, label in STAGE_LABELS
+                       if key != "research" or self.research],
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "refresh_id": self.refresh_id,
@@ -353,7 +370,7 @@ class GenerationService:
                                       run_entailment=run_entailment)
 
     def start_from_briefs(self, descriptions: list[str], run_critic: bool = True,
-                          run_entailment: bool = True) -> GenerationJob:
+                          run_entailment: bool = True, research: bool = False) -> GenerationJob:
         """One space per written brief, in a single run.
 
         Shares the single-run guard, the stage chain and the reporting with the
@@ -397,6 +414,7 @@ class GenerationService:
             constraints=GenerationConstraints(),
             kind="brief",
             briefs=briefs,
+            research=research,
             started_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         ), run_critic, run_entailment)
 
@@ -488,6 +506,23 @@ class GenerationService:
                 )
                 job.say(f"Reasoning over {ready['clusters']} theme cluster(s) "
                         f"covering {ready['clustered_signals']} classified signal(s).")
+
+            # -- stage 0: go and look, if asked ------------------------------
+            if job.research and job.briefs:
+                job.stage = "research"
+                job.say("Searching outside the corpus for evidence on this brief. The radar's own "
+                        "crawl follows the taxonomy, so an idea outside that grid can be absent "
+                        "from the corpus without being absent from the world.")
+                found = {"kept": 0}
+                try:
+                    found = scouting.research_brief(
+                        self.cfg, self.db, llm, self.embedder(),
+                        job.briefs[0], job.refresh_id or "", progress=job.say)
+                except Exception as exc:  # noqa: BLE001 — a failed look is not a failed run
+                    job.say(f"The search could not be completed ({type(exc).__name__}: {exc}). "
+                            f"Continuing against the corpus as it stands.")
+                job.stats["research"] = found
+                job.stages_done.append("research")
 
             # -- stage 1: synthesis, the only creative step ------------------
             job.stage = "synthesise"

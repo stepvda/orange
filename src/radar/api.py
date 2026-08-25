@@ -1708,6 +1708,78 @@ class HypothesisIn(BaseModel):
     run_entailment: bool = True
 
 
+class GenerateAnywayIn(BaseModel):
+    """Build this space, whatever the corpus currently says.
+
+    The corpus is a taxonomy-driven crawl, not the world, so "no evidence here"
+    can mean "nobody wrote about it" or "our query grid never asked". This path
+    stops guessing between the two: it goes and looks, and if the person has
+    first-hand knowledge it records that too. Then it runs the ordinary
+    synthesis, which still has to cite whatever came back.
+    """
+
+    description: str = Field(min_length=MIN_BRIEF_CHARS, max_length=MAX_BRIEF_CHARS)
+    #: Optional. What the person knows that nobody has published — recorded as
+    #: an attributable internal signal so the space can rest on it if the search
+    #: comes back empty.
+    rationale: str | None = Field(None, max_length=2000)
+    kind: str = "customer_conversation"
+    vertical: str | None = None
+    geographies: list[str] = Field(default_factory=list)
+    #: Search outside the corpus first. On by default: this endpoint exists
+    #: because the corpus came up short.
+    research: bool = True
+    run_critic: bool = True
+    run_entailment: bool = True
+
+
+@app.post("/api/generate/anyway")
+def start_generation_anyway(payload: GenerateAnywayIn, request: Request) -> dict[str, Any]:
+    """Generate the space regardless of what the corpus holds today.
+
+    Two ways to close the gap, used together rather than chosen between. The run
+    SEARCHES for evidence on this brief (`radar.scouting`) — the sources that
+    take a free-text query, through the ordinary relevance gate and tiering — and
+    where the person has first-hand knowledge that is recorded as an internal
+    signal under their name. Synthesis then runs unchanged: every claim still
+    cites something dated and attributable, and the critic still gets a vote.
+
+    What this does NOT do is let a space be written on nothing. That is the one
+    line worth keeping: a radar whose spaces might rest on invented citations is
+    a radar nobody can check.
+    """
+    if (reason := _generation.encoder_reason()) is not None:
+        raise HTTPException(409, reason)
+    if payload.vertical and payload.vertical not in _cfg.verticals:
+        raise HTTPException(400, f"Unknown vertical {payload.vertical!r}.")
+
+    internal_id = None
+    if payload.rationale and payload.rationale.strip():
+        if payload.kind not in internal.KINDS:
+            raise HTTPException(400, f"Unknown kind {payload.kind!r}.")
+        author = getattr(request.state, "user", None) or {}
+        internal_id = internal.record(
+            _db, author=str(author.get("username") or "unknown"), kind=payload.kind,
+            title=payload.description[:180], body=payload.rationale.strip(),
+            vertical=payload.vertical, geographies=payload.geographies, moderated=True)
+        internal.promote(_cfg, _db, embedder=_generation.embedder())
+
+    try:
+        job = _generation.start_from_briefs([payload.description],
+                                            run_critic=payload.run_critic,
+                                            run_entailment=payload.run_entailment,
+                                            research=payload.research)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if internal_id:
+        job.say(f"Contributed evidence {internal_id} recorded and available to this run.")
+    out = _job_payload(job)
+    out["internal_signal_id"] = internal_id
+    return out
+
+
 @app.post("/api/generate/hypothesis")
 def start_generation_from_hypothesis(payload: HypothesisIn, request: Request) -> dict[str, Any]:
     """Generate a space the external corpus is silent about (FR-24, §2.5).
