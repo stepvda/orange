@@ -216,8 +216,13 @@ def build_graph(cfg: Config, db: Database) -> dict[str, int]:
         retired = 0
         withdrawn_links = 0
         now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
-        for row in cur.execute("SELECT id FROM graph_nodes").fetchall():
-            if row["id"] in written:
+        # Already-retired nodes are skipped, not retired again. `node_type ||
+        # '_retired'` is not idempotent: an asset that stays out of the config
+        # collects a suffix on every rebuild — 'offer_retired_retired_retired' —
+        # which no reader matches on, and it was re-counted as a fresh
+        # withdrawal each time, so the stats reported the same removal for ever.
+        for row in cur.execute("SELECT id, node_type FROM graph_nodes").fetchall():
+            if row["id"] in written or row["node_type"].endswith("_retired"):
                 continue
             cur.execute(
                 "UPDATE opportunity_links SET rejected = 1, rejection_reason = ?, revalidated_at = ? "

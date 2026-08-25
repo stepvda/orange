@@ -221,3 +221,102 @@ def test_parallel_collect_still_deduplicates_across_sources(tmp_path, monkeypatc
     assert stats.new_signals == 1
     assert stats.duplicates == 2
     assert db.query_one("SELECT COUNT(*) n FROM signals")["n"] == 1
+
+
+def test_dedup_matches_the_stored_publisher_not_the_declared_one(tmp_path):
+    """Table 16 stage 2 dedups on URL, or on (publisher, extract).
+
+    The second half was comparing `item.publisher` while the INSERT stores
+    `item.publisher or item.source_id`, so an item from a source that names no
+    publisher could never match its own stored duplicate: re-collect the same
+    URL-less story and it landed a second time.
+    """
+    from radar.config import get_config
+    from radar.db import Database
+    from radar.connectors.base import CollectedItem
+    from radar.pipeline.ingest import IngestStats, Ingestor
+
+    cfg = get_config()
+    db = Database(tmp_path / "p.db")
+    db.init_schema()
+
+    def item(url: str) -> CollectedItem:
+        # Different URLs, same words: the syndication case the (publisher,
+        # extract) branch exists for, from a source that names no publisher.
+        return CollectedItem(
+            source_id="anonymous_feed", url=url, title="A story with no named publisher",
+            published_at=REF - dt.timedelta(days=3), extract="the body copy", publisher="",
+        )
+
+    first, second = IngestStats(), IngestStats()
+    Ingestor(cfg, db, llm=None)._store(
+        [item("https://a.example/story")], {"id": "anonymous_feed"}, "R-1", first)
+    # A SECOND Ingestor, so the answer comes from the store rather than from a
+    # set the first run happened to be holding.
+    Ingestor(cfg, db, llm=None)._store(
+        [item("https://b.example/reprint")], {"id": "anonymous_feed"}, "R-2", second)
+
+    assert first.new_signals == 1
+    assert second.new_signals == 0 and second.duplicates == 1
+    assert db.query_one("SELECT COUNT(*) n FROM signals")["n"] == 1
+
+
+def test_dedup_does_not_rescan_the_corpus_per_item(tmp_path, monkeypatch):
+    """The check used to be one `WHERE url = ? OR (publisher = ? AND extract = ?)`
+    per collected item, which SQLite plans as a full table SCAN — so a refresh
+    of n items against a corpus of m signals did O(n*m) work and got slower
+    every week for the same amount of new evidence.
+
+    Asserted as a statement count rather than a duration: a timing bound is a
+    flaky test on shared hardware, and the SHAPE is what regressed. Reading the
+    corpus twice would be fine; reading it once per item is not.
+    """
+    import sqlite3
+
+    from radar.config import get_config
+    from radar.db import Database
+    from radar.connectors.base import CollectedItem
+    from radar.pipeline.ingest import IngestStats, Ingestor
+
+    seen: list[str] = []
+
+    class CountingCursor(sqlite3.Cursor):
+        def execute(self, sql, parameters=(), /):
+            seen.append(" ".join(sql.split()))
+            return super().execute(sql, parameters)
+
+    class CountingConnection(sqlite3.Connection):
+        def cursor(self, factory=CountingCursor):
+            return super().cursor(factory)
+
+        def execute(self, sql, parameters=(), /):
+            seen.append(" ".join(sql.split()))
+            return super().execute(sql, parameters)
+
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(
+        sqlite3, "connect",
+        lambda *a, **kw: real_connect(*a, **{**kw, "factory": CountingConnection}))
+
+    cfg = get_config()
+    db = Database(tmp_path / "q.db")
+    db.init_schema()
+
+    def batch(prefix: str, n: int) -> list[CollectedItem]:
+        return [CollectedItem(source_id="s", url=f"https://example.invalid/{prefix}-{i}",
+                              title=f"{prefix}{i}", published_at=REF - dt.timedelta(days=1),
+                              extract=f"{prefix} body {i}", publisher="p")
+                for i in range(n)]
+
+    Ingestor(cfg, db, llm=None)._store(batch("seed", 200), {"id": "s"}, "R-seed", IngestStats())
+
+    def reads_for(n: int) -> int:
+        seen.clear()
+        Ingestor(cfg, db, llm=None)._store(
+            batch(f"new{n}", n), {"id": "s"}, f"R-{n}", IngestStats())
+        return sum(1 for sql in seen if sql.startswith("SELECT") and "FROM signals" in sql)
+
+    small, large = reads_for(10), reads_for(120)
+    assert small == large, (
+        f"dedup reads scale with the batch: {small} SELECT(s) for 10 items, {large} for 120")
+    assert large <= 2, f"the corpus should be read about once per run, not {large} times"

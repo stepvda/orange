@@ -344,8 +344,6 @@ class ScopingService:
             description = " ".join(str(item.get("description") or "").split())
             triple, invalid = self._resolve_triple(item)
             problems: list[str] = []
-            #: Set when the ONLY thing wrong is that the corpus is silent.
-            hypothesis = False
             if len(description) < MIN_BRIEF_CHARS:
                 problems.append(
                     f"Too short to retrieve with — {MIN_BRIEF_CHARS} characters is the minimum.")
@@ -381,7 +379,6 @@ class ScopingService:
                     ],
                 }
                 if not payload["signals"]:
-                    hypothesis = True
                     problems.append(
                         f"Nothing in the corpus sits above the similarity floor "
                         f"({synth.brief_floor:.2f}) for this brief, so an evidence-backed run "
@@ -390,10 +387,9 @@ class ScopingService:
                         f"being wrong."
                     )
                 elif evidence["corroborated"] < self._min_signals:
-                    # NOT a dead end — see `hypothesis` below. Refusing here and
-                    # stopping is what made this screen useless for the thing it
-                    # was most wanted for.
-                    hypothesis = True
+                    # NOT a dead end — see the `hypothesis` key below. Refusing
+                    # here and stopping is what made this screen useless for the
+                    # thing it was most wanted for.
                     supported = evidence["corroborated"]
                     problems.append(
                         f"{evidence['count']} signal(s) read like this brief, but only "

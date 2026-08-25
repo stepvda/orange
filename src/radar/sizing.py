@@ -35,9 +35,7 @@ the sizing config version, for the same reason a score records its weight set
 from __future__ import annotations
 
 import datetime as dt
-import json
 import logging
-import statistics
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 

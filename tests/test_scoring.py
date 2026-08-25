@@ -195,6 +195,36 @@ def test_research_only_is_later(cfg):
     assert horizon["value"] == "later"
 
 
+def test_the_now_window_is_configuration_rather_than_a_constant(cfg, monkeypatch):
+    """NFR-11: thresholds are configuration, not code.
+
+    `settings.horizon.now_max_months` was read into a local and then ignored —
+    the Now test compared against a hard-coded 365 days — so moving the knob
+    changed nothing and the config, the docstring and the behaviour were free to
+    disagree without anybody noticing.
+    """
+    just_over_a_year = [signal("SIG-1", stype="buying_signal", days_ago=400)]
+
+    at_twelve = derive_horizon(cfg, {"statement": "s"}, just_over_a_year, REF)
+    assert at_twelve["value"] == "later", "400 days is outside a twelve-month window"
+
+    monkeypatch.setitem(cfg.settings["horizon"], "now_max_months", 18)
+    at_eighteen = derive_horizon(cfg, {"statement": "s"}, just_over_a_year, REF)
+    assert at_eighteen["value"] == "now"
+    assert at_eighteen["basis"] == "budgeted_procurement_within_18_months"
+    assert "18 months" in at_eighteen["test_applied"], "the stated test must quote the real window"
+
+
+def test_the_now_window_counts_calendar_months(cfg):
+    """Twelve months is a year on the calendar, not `12 * 30` days."""
+    from radar.scoring import _months_before
+
+    assert _months_before(dt.date(2026, 8, 17), 12) == dt.date(2025, 8, 17)
+    # A day the target month does not have is clamped rather than overflowing.
+    assert _months_before(dt.date(2026, 3, 31), 1) == dt.date(2026, 2, 28)
+    assert _months_before(dt.date(2026, 1, 15), 13) == dt.date(2024, 12, 15)
+
+
 def test_horizon_always_states_which_test_it_applied(cfg):
     """§4.8: where derivation is impossible the model may classify, but must say
     which test it applied."""

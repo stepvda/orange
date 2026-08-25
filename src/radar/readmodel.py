@@ -566,12 +566,21 @@ class ReadModel:
             if pool and slot:
                 seed = f"{role}|{sorted(filters.items())}|{dt.date.today().isoformat()}"
                 digest = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
+                # Compared by id. The membership test used to be `chosen not in
+                # exploration`, against a list holding COPIES that carry an extra
+                # `exploration_slot` key — so it never matched and the guard it
+                # looks like was doing nothing. Two offsets can land on the same
+                # index whenever the stride and the pool size share a factor, and
+                # the same topic would then be shown twice in one slot.
+                picked: set[str] = set()
                 for offset in range(min(slot, len(pool))):
                     chosen = pool[(digest + offset * 7919) % len(pool)]
-                    if chosen not in exploration:
-                        chosen = dict(chosen)
-                        chosen["exploration_slot"] = True
-                        exploration.append(chosen)
+                    if chosen["id"] in picked:
+                        continue
+                    picked.add(chosen["id"])
+                    chosen = dict(chosen)
+                    chosen["exploration_slot"] = True
+                    exploration.append(chosen)
 
         last_refresh = self.db.query_one(
             "SELECT finished_at, started_at, reference_date FROM refreshes "

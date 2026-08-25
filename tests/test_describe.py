@@ -406,7 +406,11 @@ def test_brief_goes_stale_when_the_narrative_is_rewritten(cfg, db, tmp_path):
 
 def test_brief_goes_stale_when_the_market_size_is_recomputed(cfg, db, tmp_path):
     """A brief quotes figures; recomputing them invalidates the quote."""
-    from tests.test_sizing import seed_reference, seed_tender
+    # `tests` is not a package — pytest puts this directory on sys.path, so the
+    # sibling module is imported by its own name. `from tests.test_sizing import`
+    # only resolves when the project root happens to be on the path, which
+    # `pythonpath = ["src"]` guarantees it is not.
+    from test_sizing import seed_reference, seed_tender
 
     from radar.sizing import MarketSizer
 

@@ -36,7 +36,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import (BaseDocTemplate, Flowable, Frame, KeepTogether, PageBreak,
                                 PageTemplate, Paragraph, Spacer, Table, TableStyle)
 
-from .brief import INK, MUTED, ORANGE, ORANGE_DARK, RULE, SURFACE, WARN, WARN_BG, _styles, _text
+from .brief import INK, MUTED, ORANGE, ORANGE_DARK, RULE, SURFACE, _styles, _text
 from .config import Config
 from .db import Database
 
