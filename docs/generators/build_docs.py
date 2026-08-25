@@ -5,8 +5,8 @@ Both embed the diagrams from docs/diagrams/, so run build_diagrams.py first if
 they have changed. The narrative is hand-written in docs/_build/*_content.py —
 this only assembles it.
 
-    python3 docs/build_diagrams.py     # first, if figures changed
-    python3 docs/build_docs.py
+    python3 docs/generators/build_diagrams.py     # first, if figures changed
+    python3 docs/generators/build_docs.py
 """
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ import pathlib
 import runpy
 import sys
 
-HERE = pathlib.Path(__file__).resolve().parent
-BUILD = HERE / "_build"
+DOCS = pathlib.Path(__file__).resolve().parent.parent
+BUILD = DOCS / "_build"
 
 DOCUMENTS = [
     ("Functional Design Document", "fdd_content.py"),

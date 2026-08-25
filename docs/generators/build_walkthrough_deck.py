@@ -16,12 +16,12 @@ Seven chapters:
   6  Creating a space: the two routes in
   7  The Planner
 
-Every screenshot is the real application, captured by docs/build_shots.py
+Every screenshot is the real application, captured by docs/generators/build_shots.py
 against the running instance. Layout helpers are imported from build_deck.py so
 the two decks cannot drift apart typographically.
 
-    python3 docs/build_shots.py            # first — needs the app running
-    python3 docs/build_walkthrough_deck.py
+    python3 docs/generators/build_shots.py            # first — needs the app running
+    python3 docs/generators/build_walkthrough_deck.py
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from pptx.util import Inches, Pt
 from build_deck import (BLUE, GREEN, INK, LIGHT, MONO, MUTED, ORANGE, RED, RULE, SANS, W, H,
                         WHITE, F, blank, bullets, caption, header, picture, rect, stat, text)
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "docs" / "Orange_Innovation_Radar_Walkthrough.pptx"
 
 PALE = RGBColor(0xC3, 0xC2, 0xB7)

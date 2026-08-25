@@ -11,8 +11,8 @@ the plan document, a built battlecard — and headless Chromium renders an empty
 grey box in their place. Half the point of the pre-sales and Planner shots is
 that the document is actually there.
 
-    python3 docs/build_shots.py            # everything, into /tmp/vid/shots
-    python3 docs/build_shots.py radar list # only those
+    python3 docs/generators/build_shots.py            # everything, into /tmp/vid/shots
+    python3 docs/generators/build_shots.py radar list # only those
 
 Prerequisites: the API on :8000 and the frontend on :5173.
 """
@@ -22,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 OUT = Path("/tmp/vid/shots")
 BASE = "http://localhost:5173"
 

@@ -38,10 +38,10 @@ CUMULATIVE target. A step that overruns is absorbed by the next rather than
 pushing the voice out of step for the rest of the film.
 
 Prerequisites: the API on :8000, the frontend on :5173, and
-docs/build_walkthrough_deck.py already run.
+docs/generators/build_walkthrough_deck.py already run.
 
-    python3 docs/build_demo.py
-    python3 docs/build_demo.py --chapters 3,7     # re-record two chapters only
+    python3 docs/generators/build_demo.py
+    python3 docs/generators/build_demo.py --chapters 3,7     # re-record two chapters only
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ from pathlib import Path
 
 import edge_tts
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WORK = Path("/tmp/demo")
 SLIDES = WORK / "slides"
 AUDIO = WORK / "audio"
@@ -426,7 +426,7 @@ def render_slides() -> None:
         print(f"slides already rendered in {SLIDES}")
         return
     if not DECK.exists():
-        raise SystemExit(f"{DECK} is missing — run docs/build_walkthrough_deck.py first.")
+        raise SystemExit(f"{DECK} is missing — run docs/generators/build_walkthrough_deck.py first.")
     subprocess.run(["soffice", "--headless", "--convert-to", "pdf",
                     "--outdir", str(WORK), str(DECK)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

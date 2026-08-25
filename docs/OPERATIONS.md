@@ -363,29 +363,29 @@ the interface refuses to plot a trajectory across the boundary silently.
 
 ```bash
 # diagrams (matplotlib, no external tooling)
-python3 docs/build_diagrams.py
+python3 docs/generators/build_diagrams.py
 
 # API and data-model references, generated from the running code
-python3 docs/build_reference.py
+python3 docs/generators/build_reference.py
 
 # the two design documents, which embed the diagrams
-python3 docs/build_docs.py
+python3 docs/generators/build_docs.py
 
 # the screenshots both decks put on their slides — needs the app running
-python3 docs/build_shots.py
+python3 docs/generators/build_shots.py
 
 # the decks
-python3 docs/build_deck.py                 # Orange_Innovation_Radar.pptx
-python3 docs/build_walkthrough_deck.py     # ..._Walkthrough.pptx
+python3 docs/generators/build_deck.py                 # Orange_Innovation_Radar.pptx
+python3 docs/generators/build_walkthrough_deck.py     # ..._Walkthrough.pptx
 
 # the narrated films — these need the app running on :8000 and :5173
-python3 docs/build_video.py                # the concept film
-python3 docs/build_demo.py                 # the narrated product demo
+python3 docs/generators/build_video.py                # the concept film
+python3 docs/generators/build_demo.py                 # the narrated product demo
 ```
 
 The references are regenerated from the code and the live schema, so they cannot
 drift. The narrative documents are hand-written in `docs/_build/*_content.py` and
-need judgement to update — `build_docs.py` only assembles them.
+need judgement to update — `generators/build_docs.py` only assembles them.
 
 **The two film builds drive a real browser against the running application.**
 Nothing in either is mocked, and the demo runs the browser **headed** rather than

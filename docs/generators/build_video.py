@@ -16,9 +16,9 @@ demo script dwells on each step for its own line's duration. That keeps voice
 and picture together without hand-tuned sleeps.
 
 Prerequisites: the API on :8000 and the frontend on :5173 must be running, and
-docs/build_deck.py must have been run.
+docs/generators/build_deck.py must have been run.
 
-    python3 docs/build_video.py
+    python3 docs/generators/build_video.py
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import edge_tts
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WORK = Path("/tmp/vid")
 SLIDES = WORK / "slides"
 AUDIO = WORK / "audio"
@@ -521,7 +521,7 @@ def render_slides() -> None:
         print(f"slides already rendered in {SLIDES}")
         return
     if not DECK.exists():
-        raise SystemExit(f"{DECK} is missing — run docs/build_deck.py first.")
+        raise SystemExit(f"{DECK} is missing — run docs/generators/build_deck.py first.")
     subprocess.run(["soffice", "--headless", "--convert-to", "pdf",
                     "--outdir", str(WORK), str(DECK)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

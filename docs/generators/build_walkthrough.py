@@ -1,6 +1,6 @@
 """Build the hands-on walkthrough video (docs/Orange_Innovation_Radar_Walkthrough.mp4).
 
-SUPERSEDED BY docs/build_demo.py. That build covers everything this one does and
+SUPERSEDED BY docs/generators/build_demo.py. That build covers everything this one does and
 four subsystems this one predates — the Planner, the pre-sales pack, the scoping
 conversation and sign-in — and it records HEADED, so the embedded PDFs actually
 render. This script is kept because the film it produced is still in docs/ and a
@@ -18,10 +18,10 @@ so its exact length is known, and the browser holds each step until a CUMULATIVE
 target, so a step that overruns is absorbed by the next rather than pushing the
 voice out of step with the picture for the rest of the film.
 
-Prerequisites: API on :8000, frontend on :5173, and docs/build_deck.py already
+Prerequisites: API on :8000, frontend on :5173, and docs/generators/build_deck.py already
 run (this reuses its rendered slides).
 
-    python3 docs/build_walkthrough.py
+    python3 docs/generators/build_walkthrough.py
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from pathlib import Path
 
 import edge_tts
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WORK = Path("/tmp/walk")
 SLIDES = Path("/tmp/vid/slides")          # rendered by the deck build
 AUDIO = WORK / "audio"
@@ -501,7 +501,7 @@ def build_tour_segment(video: Path, out: Path) -> None:
 
 def main() -> int:
     if not (SLIDES / "slide-01.png").exists():
-        print("Rendered slides missing — run docs/build_deck.py and render to /tmp/vid/slides.",
+        print("Rendered slides missing — run docs/generators/build_deck.py and render to /tmp/vid/slides.",
               file=sys.stderr)
         return 1
     WORK.mkdir(parents=True, exist_ok=True)

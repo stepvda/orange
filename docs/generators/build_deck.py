@@ -5,7 +5,7 @@ when the numbers change — every figure below is pulled from the live database
 rather than typed in, which is the same discipline the product itself applies to
 its own claims.
 
-    python3 docs/build_deck.py
+    python3 docs/generators/build_deck.py
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SHOTS = Path("/tmp/vid/shots")
 OUT = ROOT / "docs" / "Orange_Innovation_Radar.pptx"
 

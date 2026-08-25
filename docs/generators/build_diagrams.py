@@ -6,7 +6,7 @@ laid out on a 0..100 canvas so positions are declarative and comparable across
 figures, and connectors route through explicit waypoints because auto-routing
 overlaps labels.
 
-    python3 docs/build_diagrams.py
+    python3 docs/generators/build_diagrams.py
 """
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ import pathlib
 import runpy
 import sys
 
-HERE = pathlib.Path(__file__).resolve().parent
-BUILD = HERE / "_build"
+DOCS = pathlib.Path(__file__).resolve().parent.parent
+BUILD = DOCS / "_build"
 
 #: Run order matters only in that later scripts may overwrite earlier drafts of
 #: the same figure. Each module writes directly into docs/diagrams/.
@@ -49,7 +49,7 @@ SCRIPTS = [
 
 def main() -> int:
     sys.path.insert(0, str(BUILD))
-    out = HERE / "diagrams"
+    out = DOCS / "diagrams"
     out.mkdir(parents=True, exist_ok=True)
     for name in SCRIPTS:
         path = BUILD / f"{name}.py"
