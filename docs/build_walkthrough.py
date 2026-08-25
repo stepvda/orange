@@ -297,9 +297,20 @@ def record_tour(durations: dict[str, float]) -> Path:
                 print(f"  skipped {what}: {str(exc).splitlines()[0][:90]}")
 
         # The header repeats view names in a skip-nav landmark, so scope by group.
+        # Two groups, because the top bar has two: the view tabs, and the tray
+        # holding Generate / Workflow / Planner. Workflow is a tab that lives in
+        # the second one — it renders in the reading layout like every other tab,
+        # but it is read beside the two controls that also change the portfolio.
         def tab(name: str):
-            safe(lambda: page.get_by_label("View").get_by_role(
-                "button", name=name, exact=True).click(), f"tab {name}")
+            def click() -> None:
+                for group in ("View", "Portfolio"):
+                    button = page.get_by_role("group", name=group).get_by_role(
+                        "button", name=name, exact=True)
+                    if button.count():
+                        button.first.click()
+                        return
+                raise LookupError(f"no {name!r} button in the View or Portfolio groups")
+            safe(click, f"tab {name}")
             page.wait_for_timeout(500)
 
         def role(name: str):

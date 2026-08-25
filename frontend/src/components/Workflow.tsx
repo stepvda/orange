@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Topic } from '../types'
 import { HelpButton } from './Help'
 
@@ -258,14 +258,86 @@ export function StageControl({ topic, role, meta, onMoved }: {
   )
 }
 
-export function Board({ board, selectedId, onSelect, onExplain }: {
+/** The MIME-ish key the board drags under.
+ *
+ * A custom type rather than `text/plain`: the drop zone can then ask, during
+ * `dragover`, whether what is being dragged is one of its own cards — and say
+ * no to a file, a selection of text, or a link from another window before the
+ * user has committed to the drop. `text/plain` is set as well, so dragging a
+ * card into an editor still yields its id rather than nothing. */
+const DRAG_TYPE = 'application/x-radar-space'
+
+export function Board({ board, selectedId, onSelect, onExplain, onMove }: {
   board: BoardData; selectedId: string | null; onSelect: (id: string) => void
   onExplain?: (id: string) => void
+  /** Move a space to another stage. Absent for a read-only board — the cards
+   *  then keep their click and lose their drag, rather than offering a gesture
+   *  that quietly fails. */
+  onMove?: (topicId: string, toStage: string) => void
 }) {
+  // Which column the pointer is currently over, so it can say so. Tracked with
+  // a counter per column rather than a boolean: `dragleave` fires when the
+  // pointer crosses onto a CHILD of the column, so a boolean flickers off every
+  // time the cursor passes over a card inside the column it is already in.
+  const [overStage, setOverStage] = useState<string | null>(null)
+  const depth = useRef(0)
+  const [dragging, setDragging] = useState<string | null>(null)
+
+  const stages = board.stages.filter(
+    (s) => !['parked', 'rejected'].includes(s.id) || s.count > 0)
+
+  const endDrag = () => { depth.current = 0; setOverStage(null); setDragging(null) }
+
+  /** Alt + arrow, for anyone not using a mouse.
+   *
+   * Drag and drop has no keyboard equivalent, and the stage gate is the one
+   * place in this interface where the gesture CHANGES something rather than
+   * rearranging a view. Alt is the modifier because the arrows alone belong to
+   * the scroll container the cards sit in. */
+  const onCardKey = (event: React.KeyboardEvent, topicId: string, index: number) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault(); onSelect(topicId); return
+    }
+    if (!onMove || !event.altKey) return
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+    if (!step) return
+    const next = stages[index + step]
+    if (!next) return
+    event.preventDefault()
+    onMove(topicId, next.id)
+  }
+
   return (
-    <div className="board">
-      {board.stages.filter((s) => !['parked', 'rejected'].includes(s.id) || s.count > 0).map((stage) => (
-        <div className="board-col" key={stage.id}>
+    <div className="board" onDragEnd={endDrag}>
+      {stages.map((stage, stageIndex) => (
+        <div className={`board-col${overStage === stage.id ? ' drop-over' : ''}`} key={stage.id}
+             onDragEnter={(e) => {
+               if (!onMove || !e.dataTransfer.types.includes(DRAG_TYPE)) return
+               depth.current += 1
+               setOverStage(stage.id)
+             }}
+             onDragOver={(e) => {
+               if (!onMove || !e.dataTransfer.types.includes(DRAG_TYPE)) return
+               // Without this the browser refuses the drop: the default action
+               // for dragover is "this is not a drop target".
+               e.preventDefault()
+               e.dataTransfer.dropEffect = 'move'
+             }}
+             onDragLeave={() => {
+               depth.current -= 1
+               if (depth.current <= 0) { depth.current = 0; setOverStage(null) }
+             }}
+             onDrop={(e) => {
+               const id = e.dataTransfer.getData(DRAG_TYPE)
+               endDrag()
+               if (!onMove || !id) return
+               e.preventDefault()
+               // Dropping a card back where it started is not a transition, and
+               // recording one would put a no-op in the audit trail the stage
+               // gate exists to produce.
+               if (stage.topics.some((t) => t.id === id)) return
+               onMove(id, stage.id)
+             }}>
           <div className="board-head">
             <h4>{stage.label} <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>
               {stage.count}
@@ -275,8 +347,22 @@ export function Board({ board, selectedId, onSelect, onExplain }: {
           <div className="board-body">
             {stage.topics.map((topic) => (
               <div key={topic.id}
-                   className={`board-card${topic.workflow?.stalled ? ' stalled' : ''}${topic.divergence ? ' diverging' : ''}`}
+                   className={`board-card${topic.workflow?.stalled ? ' stalled' : ''}`
+                     + `${topic.divergence ? ' diverging' : ''}`
+                     + `${dragging === topic.id ? ' dragging' : ''}`}
+                   role="button" tabIndex={0}
                    aria-selected={selectedId === topic.id}
+                   title={onMove
+                     ? `${topic.id} — drag to another stage, or focus it and press Alt + ← / →`
+                     : topic.id}
+                   draggable={Boolean(onMove)}
+                   onDragStart={(e) => {
+                     e.dataTransfer.setData(DRAG_TYPE, topic.id)
+                     e.dataTransfer.setData('text/plain', topic.id)
+                     e.dataTransfer.effectAllowed = 'move'
+                     setDragging(topic.id)
+                   }}
+                   onKeyDown={(e) => onCardKey(e, topic.id, stageIndex)}
                    onClick={() => onSelect(topic.id)}>
                 <div className="bc-id">{topic.id}</div>
                 <div>{topic.statement.slice(0, 96)}{topic.statement.length > 96 ? '…' : ''}</div>
@@ -297,7 +383,7 @@ export function Board({ board, selectedId, onSelect, onExplain }: {
               </div>
             ))}
             {stage.topics.length === 0 && (
-              <div style={{ color: 'var(--text-muted)', fontSize: 11.5, padding: 8 }}>Empty</div>
+              <div className="board-empty">{onMove ? 'Empty — drop a space here' : 'Empty'}</div>
             )}
           </div>
         </div>

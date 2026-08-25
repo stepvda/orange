@@ -265,23 +265,46 @@ button[aria-pressed="true"] {
 
 .app { display: flex; flex-direction: column; min-height: 100%; }
 
+/* Top-bar geometry. Two numbers, because a dozen rules depend on them: every
+   control in the bar is exactly --topbtn-h tall, and every sticky pane below
+   starts at --topbar-h. The second is a FALLBACK for the first paint — App
+   measures the header and overwrites it, so the panes stay aligned when the bar
+   wraps on a narrow window or gains its small-print line. */
+:root { --topbtn-h: 34px; --topbar-h: 88px; }
+
 .topbar {
-  display: flex; align-items: center; gap: 20px;
-  padding: 12px 20px;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 9px 20px 8px;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
   position: sticky; top: 0; z-index: 20;
 }
-.brand { display: flex; align-items: baseline; gap: 10px; flex: none; }
+
+/* The controls. One line at 2560px — which is the whole point of the small-print
+   line below it, of the two-line labels, and of a sign-out button that is a door
+   and not a word. `wrap` stays on because a laptop is not a 2K screen and a bar
+   that overflows its window is worse than one that takes two rows; it just no
+   longer fires at the width this was designed for. */
+.topbar-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.topbar-row > * { min-width: 0; }
+
+/* What the bar STATES rather than offers: which corpus this is, when it was last
+   refreshed, and which weight set produced the scores. None of it is a control,
+   and all of it was competing for width with the controls. */
+.topbar-info {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--text-muted); line-height: 1.3;
+}
+.topbar-info .ti-sub { white-space: nowrap; }
+.topbar-info .meta-chip { font-size: 10.5px; padding: 2px 9px; }
+
+.brand { display: flex; align-items: center; gap: 9px; flex: none; }
 .brand-mark {
   width: 12px; height: 12px; border-radius: 3px;
   background: var(--accent); display: inline-block;
 }
-.brand h1 { font-size: 15px; margin: 0; letter-spacing: -.01em; }
-.brand span { color: var(--text-muted); font-size: 12px; }
+.brand h1 { font-size: 15px; margin: 0; letter-spacing: -.01em; white-space: nowrap; }
 
-.roles { display: flex; gap: 6px; align-items: center; flex: none; }
 .spacer { flex: 1; }
 .meta-chip {
   font-family: var(--mono); font-size: 11px; color: var(--text-muted);
@@ -291,7 +314,43 @@ button[aria-pressed="true"] {
 button.meta-chip { cursor: pointer; }
 button.meta-chip:hover { border-color: var(--accent); color: var(--accent-text); }
 .tabs { flex-wrap: wrap; }
-.topbar > * { min-width: 0; }
+/* The tabs row now holds a box as well as bare buttons, and the box is taller
+   than what it contains. Centred, so the loose tabs sit on the same optical
+   line as the boxed pair rather than hanging from the top of the row. */
+.topbar-row .tabs { align-items: center; }
+
+/* Every control in the bar is one height, whether its label runs to one line or
+   two and whether it has a label at all. A row of buttons that disagree about
+   their height reads as several bars rather than one. */
+.topbtn {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: var(--topbtn-h); box-sizing: border-box;
+  padding: 0 10px; flex: none;
+  font-size: 11.5px; line-height: 1.14; text-align: left;
+}
+.btn-icon { width: 15px; height: 15px; flex: none; opacity: .85; }
+.topbtn:hover .btn-icon, .topbtn[aria-pressed="true"] .btn-icon { opacity: 1; }
+/* Two lines inside one button. The stacked halves are what let the row hold
+   fourteen controls without wrapping; the height was already paid for. */
+.btn-label { display: flex; flex-direction: column; min-width: 0; }
+.btn-label > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Deliberately NOT the global pressed weight. Bolding the label changes the
+   button's width, and in a row tuned to fit on one line a click that widens
+   something can tip the whole bar onto a second row. The accent fill already
+   says which one is on, unmistakably. */
+.topbtn[aria-pressed="true"] { font-weight: inherit; }
+.topbtn.icon-only { padding: 0; width: var(--topbtn-h); justify-content: center; }
+.topbtn.icon-only .btn-icon { width: 16px; height: 16px; }
+
+/* A box around a set of buttons that are one decision. The roles are "pick
+   exactly one lens"; Generate / Workflow / Planner are the three things a team
+   does TO the portfolio rather than three ways of looking at it. The tray sits
+   on the page colour so it reads as recessed into the bar. */
+.btn-group {
+  display: flex; align-items: center; gap: 4px; flex: none;
+  padding: 3px; background: var(--surface-0);
+  border: 1px solid var(--border-strong); border-radius: calc(var(--radius-sm) + 3px);
+}
 
 /* The three panes are sized from custom properties rather than fixed values, so
    the splitter can move the boundary between the middle and right panes and the
@@ -321,8 +380,8 @@ button.meta-chip:hover { border-color: var(--accent); color: var(--accent-text);
 .filters-pane {
   border-right: 1px solid var(--border);
   background: var(--surface-1);
-  padding: 16px; overflow-y: auto; max-height: calc(100vh - 58px);
-  position: sticky; top: 58px;
+  padding: 16px; overflow-y: auto; max-height: calc(100vh - var(--topbar-h));
+  position: sticky; top: var(--topbar-h);
 }
 .filters-pane.collapsed { padding: 10px 6px; overflow: hidden; }
 .filters-pane.collapsed .filters-body { display: none; }
@@ -372,9 +431,9 @@ button.meta-chip:hover { border-color: var(--accent); color: var(--accent-text);
 
 /* The rail that brings the detail pane back. */
 .detail-restore {
-  position: sticky; top: 58px; align-self: start;
+  position: sticky; top: var(--topbar-h); align-self: start;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
-  height: calc(100vh - 58px); padding: 12px 4px;
+  height: calc(100vh - var(--topbar-h)); padding: 12px 4px;
   border-left: 1px solid var(--border); border-right: none; border-top: none; border-bottom: none;
   border-radius: 0; background: var(--surface-1); color: var(--text-muted);
   font-size: 12px;
@@ -391,8 +450,8 @@ body[data-resizing="true"] { cursor: col-resize; user-select: none; }
 .detail-pane {
   border-left: 1px solid var(--border);
   background: var(--surface-1);
-  padding: 18px; overflow-y: auto; max-height: calc(100vh - 58px);
-  position: sticky; top: 58px;
+  padding: 18px; overflow-y: auto; max-height: calc(100vh - var(--topbar-h));
+  position: sticky; top: var(--topbar-h);
 }
 
 /* ---------- filters ---------- */
@@ -716,6 +775,45 @@ table.data td.num { font-family: var(--mono); text-align: right; }
 .board-card.diverging { border-left-color: var(--status-serious); }
 .board-card .bc-id { font-family: var(--mono); font-size: 10px; color: var(--text-muted); }
 .board-card .bc-meta { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; }
+
+/* --- moving a space between stages ---------------------------------------
+ *
+ * The card is the handle. There is no separate grip: the whole card is the
+ * thing being moved, and a six-pixel grip on a card this size is a target
+ * people miss and then click, which selects instead of moving.
+ */
+.board-card[draggable="true"] { cursor: grab; }
+.board-card[draggable="true"]:active { cursor: grabbing; }
+/* The card being dragged stays in place, faded. Removing it would collapse the
+   column under the cursor and move every other card out from under the pointer
+   mid-gesture. */
+.board-card.dragging { opacity: .4; border-style: dashed; }
+.board-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The column under the pointer. A fill and a border, not a border alone: the
+   cards inside already carry borders, and one more would be lost among them. */
+.board-col.drop-over {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.board-col.drop-over .board-head { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.board-col.drop-over .board-empty { color: var(--accent-text); border-color: var(--accent); }
+
+.board-empty {
+  color: var(--text-muted); font-size: 11.5px; padding: 10px 8px; text-align: center;
+  border: 1px dashed var(--border); border-radius: var(--radius-sm);
+}
+
+/* A move the server refused, said on the board where the move was made. */
+.board-error {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 8px 11px; font-size: 12.5px;
+  border: 1px solid var(--status-serious); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--status-serious) 8%, transparent);
+  color: var(--text-primary);
+}
+.board-error > :nth-child(2) { flex: 1; min-width: 0; }
+.board-error button { font-size: 11.5px; padding: 3px 9px; }
 
 .rating { display: flex; gap: 4px; }
 .rating button {
@@ -1139,12 +1237,19 @@ table.data td.num { font-family: var(--mono); text-align: right; }
  */
 .layout[hidden] { display: none; }
 
-.generate-btn {
-  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
-  font-weight: 600; flex: none;
-}
-.generate-btn:hover { border-color: var(--accent-text); }
-.generate-btn[aria-pressed="true"] { background: var(--accent-text); border-color: var(--accent-text); color: #fff; }
+/* Generate, Workflow and Planner share one resting appearance, because they
+   share a tray. Generate used to be filled accent at rest — a primary-action
+   treatment, and a defensible one while it stood alone at the end of the bar.
+   Beside two buttons that use that same accent as their PRESSED state it reads
+   as permanently selected, which is exactly what it looked like: orange whether
+   or not you were on the generator. In the tray the fill means one thing only —
+   this is the screen you are on. */
+.generate-btn, .planner-btn, .workflow-btn { background: var(--surface-2); flex: none; }
+.generate-btn:hover, .planner-btn:hover, .workflow-btn:hover { border-color: var(--accent); }
+/* What is left of Generate's emphasis: the mark, not the whole button. It is
+   the one control in the bar that writes to the corpus rather than reading it. */
+.generate-btn .btn-icon { color: var(--accent-text); opacity: 1; }
+.generate-btn[aria-pressed="true"] .btn-icon { color: inherit; }
 
 .gen-screen {
   flex: 1; padding: 18px 20px 40px; max-width: 1500px; width: 100%;
@@ -1740,11 +1845,6 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
  * parameters that produced it on the left, what was computed in the middle,
  * and the written half only when somebody asks for it.
  */
-.planner-btn {
-  background: var(--surface-2); border: 1px solid var(--accent);
-  color: var(--accent-text); font-weight: 600;
-}
-.planner-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
 
 .pl-screen .fs-title { max-width: 62%; }
 /* The provenance line. High in the page on purpose: a reader deciding how much
@@ -1984,8 +2084,7 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
 
 /* ---------- the account, in the top bar ---------- */
 
-.account-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 170px; }
-.account-chip > :first-child { overflow: hidden; text-overflow: ellipsis; }
+.account-btn { max-width: 170px; font-family: var(--mono); font-size: 11px; }
 /* The default-password mark. A glyph, not a colour: "this account is still on
    the shipped credential" is a fact a colourblind reader needs too. */
 .account-warn {
@@ -1993,7 +2092,10 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
   border-radius: 50%; background: var(--status-serious); color: var(--status-serious-ink);
   font-size: 10px; font-weight: 700; font-family: var(--mono);
 }
-.signout-btn { flex: none; font-size: 12px; padding: 5px 11px; }
+/* Icon only. It is the one control in the bar whose mark nobody has to learn,
+   and dropping the word bought the width that keeps the row on one line. The
+   name is still on the button, for anyone reading it rather than looking. */
+.signout-btn:hover { border-color: var(--status-serious); color: var(--status-serious); }
 
 .default-password-banner, .deleted-banner {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
