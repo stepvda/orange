@@ -6,6 +6,7 @@ import TopicDetail from './components/TopicDetail'
 import { Board, type BoardData, type WorkflowMeta } from './components/Workflow'
 import { BarList, ChartCard, DivergenceChart, Heatmap, Kpi, StackedBar, StageFunnel } from './components/Charts'
 import { HelpButton, HelpModal } from './components/Help'
+import { countryNames } from './geo'
 import GenerateScreen from './components/Generate'
 import SpaceFullscreen from './components/Fullscreen'
 import PlannerScreen from './components/Planner'
@@ -117,7 +118,7 @@ function loadLayout(): Layout {
  * this tool spreads inside an organisation, so ?topic=OS012 has to survive a
  * copy-paste. ?role and ?theme ride along for the same reason.
  */
-const FILTER_KEYS = ['vertical', 'domain', 'persona', 'geography', 'horizon', 'competition'] as const
+const FILTER_KEYS = ['vertical', 'domain', 'persona', 'geography', 'market_cluster', 'horizon', 'competition'] as const
 
 function initialFromUrl() {
   const params = new URLSearchParams(window.location.search)
@@ -538,7 +539,8 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
 
   const activeFilterCount = useMemo(
     () => filters.vertical.length + filters.domain.length + filters.persona.length
-      + filters.geography.length + filters.horizon.length + (filters.q ? 1 : 0),
+      + filters.geography.length + filters.market_cluster.length
+      + filters.horizon.length + (filters.q ? 1 : 0),
     [filters],
   )
 
@@ -547,17 +549,35 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
       ...filters.vertical.map((v) => meta?.verticals.find((x) => x.id === v)?.label ?? v),
       ...filters.domain.map((d) => meta?.domains.find((x) => x.id === d)?.label ?? d),
       ...filters.persona.map((p) => meta?.personas.find((x) => x.id === p)?.label ?? p),
-      ...filters.geography, ...filters.horizon,
+      ...filters.geography,
+      ...filters.market_cluster.map((c) => meta?.market_clusters.find((m) => m.id === c)?.label ?? c),
+      ...filters.horizon,
     ]
     if (filters.q) parts.push(`“${filters.q}”`)
     return parts.length ? `Active filters: ${parts.join(', ')}` : 'No filters set'
   }, [filters, meta])
 
+  // Countries on screen, plus whatever is selected. The second half matters
+  // because selecting a market cluster ticks its members: a code the current
+  // result set does not carry would otherwise be filtering invisibly, with no
+  // row to untick. It also fixes the older version of the same problem — pick a
+  // country, narrow until nothing carries it, and the control vanished.
   const geographies = useMemo(() => {
-    const set = new Set<string>()
+    const set = new Set<string>(filters.geography)
     for (const topic of shown) topic.geographies.forEach((g) => set.add(g))
     return [...set].sort()
-  }, [shown])
+  }, [shown, filters.geography])
+
+  // The whole vocabulary, in the order Orange gave it — not the subset that
+  // happens to appear in the current page of results.
+  //
+  // This previously filtered to clusters present in `shown`, which is the capped
+  // list, so Benelux, DACH, Nordics, Eastern Europe and Africa simply vanished
+  // from the rail. Every other dimension passes its full vocabulary straight
+  // through and lets MultiSelect grey out the zeroes — "there are none of these"
+  // is information, and a control that disappears cannot be used to look for
+  // what is missing.
+  const marketClusters = useMemo(() => meta?.market_clusters ?? [], [meta])
 
   // Selecting a topic when there is no side pane has to go somewhere; silently
   // updating a pane the reader cannot see is how the content went missing.
@@ -826,6 +846,7 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                 <span className="label">Filters</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <HelpButton topic="filters" onOpen={setHelp} />
+                  <HelpButton topic="market_clusters" onOpen={setHelp} label="C" />
                   <button className="pane-toggle" title="Collapse the filter pane"
                           aria-label="Collapse the filter pane" aria-expanded
                           onClick={() => {
@@ -843,7 +864,8 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                   </p>
                 )}
                 <Filters meta={meta} filters={filters} onChange={setFilters}
-                         geographies={geographies} facets={view?.facets ?? {}}
+                         geographies={geographies} marketClusters={marketClusters}
+                         facets={view?.facets ?? {}}
                          totalMatching={view?.total_matching ?? 0}
                          loading={viewLoading && !view} />
               </div>
@@ -926,6 +948,12 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                       <div className="topic-triple">
                         {topic.labels.vertical} × {topic.labels.use_case} × {topic.labels.technology}
                         {' · '}{topic.signal_count} signals
+                        {/* The cluster, not the country codes: three ISO pairs on a
+                            list row is noise, and the grouping is what the reader
+                            is scanning for. Silent when the evidence is EU-wide
+                            and belongs to no single cluster. */}
+                        {topic.market_cluster_labels.length > 0
+                          && ` · ${topic.market_cluster_labels.join(', ')}`}
                       </div>
                       <div style={{ display: 'flex', gap: 5, marginTop: 5, flexWrap: 'wrap',
                                     alignItems: 'center' }}>
@@ -1058,6 +1086,8 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                       </button>
                       <div className="topic-triple">
                         {topic.labels.vertical} × {topic.labels.use_case} × {topic.labels.technology}
+                        {topic.market_cluster_labels.length > 0
+                          && ` · ${topic.market_cluster_labels.join(', ')}`}
                       </div>
                       {/* White space is where the strategist decides what to fund,
                           so the two facts that drive that decision travel with it —
@@ -1171,6 +1201,25 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                   )}
                 </ChartCard>
 
+                <ChartCard help="market_clusters" onHelp={setHelp}
+                           title="Where the radar has evidence, by market cluster"
+                           note="Opportunity spaces attributed to each cluster from the country codes their evidence carries. Magnitude on a single hue. Counts sum to more than the radar holds — a space with evidence in three clusters is counted in three — and EU-wide spaces appear in none of them, which is why the totals here are smaller than the corpus. Coverage reports what falls outside.">
+                  <BarList
+                    data={(meta?.market_clusters ?? [])
+                      .map((c) => ({
+                        label: c.source === 'extension' ? `${c.label} *` : c.label,
+                        value: view?.facets?.market_cluster?.[c.id] ?? 0,
+                        hint: `${countryNames(c.countries, 99).full}`
+                          + (c.source === 'email'
+                            ? ' — grouping supplied by Orange Business'
+                            : c.source === 'confirmed'
+                              ? ' — not in the supplied grouping; confirmed separately'
+                              : ' — grouping inferred from the corpus, not supplied'),
+                      }))
+                      .filter((row) => row.value > 0)
+                      .sort((a, b) => b.value - a.value)} />
+                </ChartCard>
+
                 <ChartCard help="competition" onHelp={setHelp} title="Competitive intensity"
                            note="How crowded the field is across the radar. Ordered bands, so an ordinal ramp — the reader sees the order in the colour. A radar that is all HIGH is telling you where Orange is late, not that the method is broken.">
                   {sizing && (
@@ -1238,6 +1287,7 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
               <div className="panel-head">
                 <h2>Coverage</h2>
                 <HelpButton topic="coverage" onOpen={setHelp} />
+                <HelpButton topic="market_clusters" onOpen={setHelp} label="C" />
                 <span className="sub">
                   Language, geography and competitor coverage, measured rather than assumed —
                   anglophone and EU bias is a known risk in a corpus like this.
@@ -1250,6 +1300,7 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                     ['Language', coverage.languages],
                     ['Signal type', coverage.signal_types],
                     ['Source', coverage.sources],
+                    ['Market cluster', coverage.market_clusters],
                     ['Geography', coverage.geographies],
                     ['Topics per vertical', coverage.topics_per_vertical],
                   ] as [string, Record<string, number>][]).map(([title, data]) => (
@@ -1262,6 +1313,36 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                           {Object.entries(data).slice(0, 12).map(([key, value]) => (
                             <tr key={key}><td>{key}</td><td className="num">{value}</td></tr>
                           ))}
+                  {/* NFR-08 applied to the new dimension: the cluster rollup does
+                      not cover everything, and the part it does not cover is
+                      stated rather than left to be inferred from a total that
+                      does not add up. */}
+                  <div>
+                    <h4 style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                      Outside the cluster map
+                    </h4>
+                    <table className="data">
+                      <tbody>
+                        <tr>
+                          <td title="Tagged EU or UN — real evidence, but not attributable to one cluster. Counted towards every European cluster when filtering.">
+                            EU / UN-wide
+                          </td>
+                          <td className="num">{coverage.market_cluster_gaps.supranational}</td>
+                        </tr>
+                        {Object.entries(coverage.market_cluster_gaps.unmapped).map(([code, n]) => (
+                          <tr key={code}>
+                            <td title="A country code no cluster claims — usually a malformed code from extraction. Shown rather than absorbed.">
+                              {code} (unmapped)
+                            </td>
+                            <td className="num">{n}</td>
+                          </tr>
+                        ))}
+                        {Object.keys(coverage.market_cluster_gaps.unmapped).length === 0 && (
+                          <tr><td colSpan={2} style={{ color: 'var(--text-muted)' }}>every country code maps</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                         </tbody>
                       </table>
                     </div>

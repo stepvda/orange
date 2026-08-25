@@ -2271,3 +2271,18 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
 @media (max-width: 720px) {
   .ps-row-side { flex-basis: 100%; }
 }
+
+/* Market-cluster rows carry their membership on a second line: "DACH" and
+   "Benelux" name nothing to a reader who does not already know them, and the
+   countries do not fit beside the name and the count. Deliberately scoped to
+   rows that opt in, so the one-row-one-line rule above still governs the other
+   filter dimensions. Placed last so it wins on equal specificity. */
+.filter-item > span.stacked {
+  display: flex; flex-direction: column; gap: 1px;
+  white-space: normal; overflow: visible; line-height: 1.2;
+}
+.filter-item-sub {
+  font-size: 10.5px; line-height: 1.3; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.filter-item:hover .filter-item-sub { color: var(--text-secondary); }

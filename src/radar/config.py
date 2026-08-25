@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import functools
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -261,6 +262,177 @@ class AdoptionRow:
 
 
 # ---------------------------------------------------------------------------
+# Market clusters (Orange Business go-to-market grouping)
+# ---------------------------------------------------------------------------
+
+
+class MarketClusters:
+    """The country groupings Orange Business sells in.
+
+    Deliberately a *view* over the ISO codes already carried by signals rather
+    than a second column: §2.6 attaches geography to signals, and a stored
+    cluster would be a copy of that truth free to drift from it. Re-grouping a
+    country is an edit to `clusters.yaml` and takes effect on the next request,
+    with no migration and no re-scoring.
+
+    Not to be confused with `clusters` in db.py, which are theme clusters from
+    stage-4 signal clustering. These are addressed as `market_cluster`.
+    """
+
+    def __init__(self, name: str, raw: dict[str, Any]):
+        self.name = name
+        self.version: str = raw.get("version", "unversioned")
+        self.owner: str = raw.get("owner", "unowned")
+        self.raw = raw
+        supra = raw.get("supranational") or {}
+        self.supranational: frozenset[str] = frozenset(str(c).upper() for c in supra)
+        self._spans: dict[str, tuple[str, ...]] = {}
+        self._global_codes: set[str] = set()
+        for code, entry in supra.items():
+            entry = entry or {}
+            if entry.get("global"):
+                self._global_codes.add(str(code).upper())
+            self._spans[str(code).upper()] = tuple(entry.get("spans") or ())
+        self.aliases: dict[str, str] = {
+            str(k).upper(): str(v).upper() for k, v in (raw.get("aliases") or {}).items()
+        }
+        self._items: dict[str, VocabItem] = {}
+        self._by_country: dict[str, str] = {}
+        for entry in raw.get("items", []):
+            named = tuple(str(c).upper() for c in entry.get("countries") or ())
+            extra_countries = tuple(str(c).upper() for c in entry.get("extensions") or ())
+            item = VocabItem(
+                id=entry["id"],
+                label=entry.get("label", entry["id"]),
+                definition=(entry.get("definition") or "").strip(),
+                synonyms=(),
+                exclusions=(),
+                extra={
+                    "countries": named,
+                    "extensions": extra_countries,
+                    "members": named + extra_countries,
+                    "source": entry.get("source", "extension"),
+                    "scope": entry.get("scope", "named"),
+                },
+            )
+            self._items[item.id] = item
+            for code in item.extra["members"]:
+                # First writer wins so the reverse index stays deterministic; a
+                # second claim on the same country is reported by _validate
+                # rather than silently resolved here.
+                self._by_country.setdefault(code, item.id)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._items
+
+    def __iter__(self):
+        return iter(self._items.values())
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __getitem__(self, key: str) -> VocabItem:
+        return self._items[key]
+
+    @property
+    def ids(self) -> list[str]:
+        return list(self._items)
+
+    def get(self, key: str) -> VocabItem | None:
+        return self._items.get(key)
+
+    def label(self, key: str) -> str:
+        item = self._items.get(key)
+        return item.label if item else key
+
+    def members(self, key: str) -> tuple[str, ...]:
+        item = self._items.get(key)
+        return tuple(item.extra.get("members", ())) if item else ()
+
+    def normalise(self, code: str) -> str:
+        """Upper-case and repair a country code, without guessing.
+
+        Only spellings listed in `aliases` are repaired. A near-miss like TU for
+        TR is left alone so it surfaces as unmapped instead of quietly becoming
+        evidence about Turkey.
+        """
+        upper = (code or "").strip().upper()
+        return self.aliases.get(upper, upper)
+
+    def cluster_for(self, code: str) -> str | None:
+        """The cluster a single ISO code belongs to, or None.
+
+        None covers three different things on purpose — a supranational code, an
+        unknown code and a malformed one — because the caller that needs to tell
+        them apart should ask `is_supranational`, and every other caller wants
+        the same behaviour for all three: do not claim a cluster.
+        """
+        return self._by_country.get(self.normalise(code))
+
+    def is_supranational(self, code: str) -> bool:
+        return self.normalise(code) in self.supranational
+
+    def clusters_for(self, codes: Iterable[str]) -> list[str]:
+        """Every cluster a set of codes touches, in vocabulary order.
+
+        Vocabulary order rather than input order so the same topic renders its
+        clusters identically on every request, whatever order its geographies
+        happen to be stored in.
+        """
+        hit = {c for c in (self.cluster_for(code) for code in codes or ()) if c}
+        return [cid for cid in self._items if cid in hit]
+
+    def spans(self, code: str) -> tuple[str, ...]:
+        """The clusters a supranational code reaches. Empty for a country code."""
+        return self._spans.get(self.normalise(code), ())
+
+    def reach_for(self, codes: Iterable[str]) -> list[str]:
+        """Every cluster a set of codes is RELEVANT to, which is not the same
+        thing as the clusters it belongs to.
+
+        `clusters_for` answers "what is this about" and drives display: an EU
+        directive is not about France in the way a French tender is, and showing
+        it a France chip would overclaim. This answers "who should see it when
+        they filter", and adds the clusters a supranational code reaches, so the
+        same directive still appears for a planner looking at France.
+
+        An empty result means "no opinion" — no codes at all, or a code marked
+        global — and callers treat that the way they already treat a topic with
+        no geography: shown, not hidden.
+        """
+        codes = list(codes or ())
+        if any(self.normalise(c) in self._global_codes for c in codes):
+            return []
+        hit = set(self.clusters_for(codes))
+        for code in codes:
+            hit.update(self.spans(code))
+        return [cid for cid in self._items if cid in hit]
+
+    def unmapped(self, codes: Iterable[str]) -> list[str]:
+        """Codes that are neither supranational nor in any cluster.
+
+        Reported rather than swallowed: these are the extraction bugs (TU, JA,
+        HO, SW) and the countries the taxonomy has not caught up with, and NFR-08
+        says coverage is measured, not assumed.
+        """
+        out: list[str] = []
+        for code in codes or ():
+            norm = self.normalise(code)
+            if not norm or norm in self.supranational or norm in self._by_country:
+                continue
+            if norm not in out:
+                out.append(norm)
+        return out
+
+    def prompt_block(self) -> str:
+        """Render the clusters for injection into a prompt (§4.4.2)."""
+        return "\n".join(
+            f"- {item.id}: {item.label} ({', '.join(item.extra['members'])})"
+            for item in self._items.values()
+        )
+
+
+# ---------------------------------------------------------------------------
 # Top-level config object
 # ---------------------------------------------------------------------------
 
@@ -281,6 +453,11 @@ class Config:
         self.domains = Vocabulary("domains", _load_yaml("taxonomy", "domains.yaml"))
         self.personas = Vocabulary("personas", _load_yaml("taxonomy", "personas.yaml"))
         self.signal_types = Vocabulary("signal_types", _load_yaml("taxonomy", "signal_types.yaml"))
+        # The go-to-market grouping Orange sells in (Karol Fic, 25 Aug 2026).
+        # Derived from the ISO codes already on signals, never stored twice.
+        self.market_clusters = MarketClusters(
+            "market_clusters", _load_yaml("taxonomy", "clusters.yaml")
+        )
 
         # FR-28 / Table 36. The vocabularies above are English, and the relevance
         # gate is built from them, so without this the pipeline collects French,
@@ -462,6 +639,39 @@ class Config:
         about, so it is a startup error rather than a runtime surprise.
         """
         problems: list[str] = []
+
+        # A country in two clusters makes every cluster figure ambiguous, and the
+        # reverse index would resolve it by file order — which is a coin toss
+        # dressed as a rule. Caught here instead.
+        seen_country: dict[str, str] = {}
+        for cluster in self.market_clusters:
+            for code in cluster.extra["members"]:
+                if len(code) != 2 or not code.isalpha():
+                    problems.append(
+                        f"clusters/{cluster.id}: {code!r} is not an ISO 3166-1 alpha-2 code"
+                    )
+                if code in self.market_clusters.supranational:
+                    problems.append(
+                        f"clusters/{cluster.id}: {code!r} is also listed as supranational"
+                    )
+                if code in seen_country:
+                    problems.append(
+                        f"clusters/{cluster.id}: {code!r} already claimed by "
+                        f"{seen_country[code]!r}"
+                    )
+                else:
+                    seen_country[code] = cluster.id
+        for code in self.market_clusters.supranational:
+            for cid in self.market_clusters.spans(code):
+                if cid not in self.market_clusters:
+                    problems.append(
+                        f"clusters/supranational/{code}: spans unknown cluster {cid!r}"
+                    )
+        for bad, good in self.market_clusters.aliases.items():
+            if good not in seen_country:
+                problems.append(
+                    f"clusters/aliases: {bad!r} points at {good!r}, which is in no cluster"
+                )
 
         def check(values, vocab: Vocabulary, where: str) -> None:
             for value in values or []:

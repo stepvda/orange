@@ -162,6 +162,7 @@ export const api = {
       domain: filters.domain,
       persona: filters.persona,
       geography: filters.geography,
+      market_cluster: filters.market_cluster,
       horizon: filters.horizon,
       competition: filters.competition,
       has_brief: filters.has_brief ? 'true' : undefined,
@@ -259,6 +260,7 @@ export const api = {
       domain: filters?.domain,
       persona: filters?.persona,
       geography: filters?.geography,
+      market_cluster: filters?.market_cluster,
       horizon: filters?.horizon,
       competition: filters?.competition,
       q: filters?.q || undefined,
@@ -282,6 +284,7 @@ export const api = {
       vertical: c.verticals,
       domain: c.domains,
       geography: c.geographies,
+      market_cluster: c.market_clusters,
       horizon: c.horizons,
     }),
 

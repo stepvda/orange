@@ -318,6 +318,19 @@ def meta() -> dict[str, Any]:
         "domains": _vocab_payload(_cfg.domains),
         "personas": _vocab_payload(_cfg.personas),
         "signal_types": _vocab_payload(_cfg.signal_types),
+        "market_clusters": [
+            {
+                "id": item.id,
+                "label": item.label,
+                "countries": list(item.extra["members"]),
+                # Whether Orange named this grouping or we inferred it. Surfaced
+                # so the UI can mark the inferred ones rather than presenting
+                # every cluster as equally authoritative.
+                "source": item.extra["source"],
+                "scope": item.extra["scope"],
+            }
+            for item in _cfg.market_clusters
+        ],
         "horizons": ["now", "next", "later"],
         "states": ["candidate", "watchlist", "active", "fading", "dormant", "rejected"],
         "link_types": [
@@ -366,6 +379,7 @@ def view(
     domain: list[str] | None = Query(None),
     persona: list[str] | None = Query(None),
     geography: list[str] | None = Query(None),
+    market_cluster: list[str] | None = Query(None),
     horizon: list[str] | None = Query(None),
     state: list[str] | None = Query(None),
     competition: list[str] | None = Query(None),
@@ -383,7 +397,8 @@ def view(
         key: value
         for key, value in (
             ("vertical", vertical), ("domain", domain), ("persona", persona),
-            ("geography", geography), ("horizon", horizon), ("state", state),
+            ("geography", geography), ("market_cluster", market_cluster),
+            ("horizon", horizon), ("state", state),
             ("competition", competition), ("has_brief", has_brief or None), ("q", q),
         )
         if value
@@ -448,6 +463,7 @@ def whitespace(
     domain: list[str] | None = Query(None),
     persona: list[str] | None = Query(None),
     geography: list[str] | None = Query(None),
+    market_cluster: list[str] | None = Query(None),
     horizon: list[str] | None = Query(None),
     competition: list[str] | None = Query(None),
     q: str | None = Query(None),
@@ -461,7 +477,8 @@ def whitespace(
         key: value
         for key, value in (
             ("vertical", vertical), ("domain", domain), ("persona", persona),
-            ("geography", geography), ("horizon", horizon), ("competition", competition), ("q", q),
+            ("geography", geography), ("market_cluster", market_cluster),
+            ("horizon", horizon), ("competition", competition), ("q", q),
         )
         if value
     }
@@ -1476,9 +1493,31 @@ _generation = GenerationService(_cfg, _db)
 
 
 def _generation_filters(vertical: list[str] | None, domain: list[str] | None,
-                        geography: list[str] | None, horizon: list[str] | None) -> dict[str, Any]:
-    return {key: value for key, value in (("vertical", vertical), ("domain", domain),
-                                          ("geography", geography), ("horizon", horizon)) if value}
+                        geography: list[str] | None, horizon: list[str] | None,
+                        market_cluster: list[str] | None = None) -> dict[str, Any]:
+    """Filters for the generation preview.
+
+    Clusters are expanded here rather than passed through as their own filter so
+    the preview counts what the run will actually be scoped to: `POST /api/generate`
+    expands clusters into member codes before building its constraints, and a
+    preview filtering on a different dimension than the run would be a lie told
+    with a number.
+    """
+    return {key: value for key, value in (
+        ("vertical", vertical), ("domain", domain), ("horizon", horizon),
+        ("geography", _expand_clusters(geography, market_cluster)),
+    ) if value}
+
+
+def _expand_clusters(geography: list[str] | None,
+                     market_cluster: list[str] | None) -> list[str]:
+    """Union of explicit ISO codes and the members of any named cluster."""
+    codes = list(geography or [])
+    for cluster in market_cluster or []:
+        for code in _cfg.market_clusters.members(cluster):
+            if code not in codes:
+                codes.append(code)
+    return codes
 
 
 class GenerateIn(BaseModel):
@@ -1487,6 +1526,12 @@ class GenerateIn(BaseModel):
                                    "lands on an existing taxonomy triple refreshes it instead, and "
                                    "that does not count towards this).")
     geographies: list[str] = Field(default_factory=list)
+    market_clusters: list[str] = Field(
+        default_factory=list,
+        description="Orange Business market clusters. Expanded into their member "
+                    "ISO codes and unioned with `geographies`, so a run scoped by "
+                    "cluster is exactly a run scoped by the countries in it.",
+    )
     verticals: list[str] = Field(default_factory=list)
     horizons: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
@@ -1546,11 +1591,32 @@ def generation_options() -> dict[str, Any]:
         for code in sorted(set(from_signals) | set(from_spaces))
     ]
     geographies.sort(key=lambda g: (-g["signals"], g["id"]))
+
+    # The same corpus counts rolled up the way the business buys: a planner who
+    # thinks in "the Nordics" should not have to tick five boxes and know which
+    # five. Built from the codes actually present, so a cluster with no evidence
+    # behind it reports zero rather than being quietly omitted.
+    mc = _cfg.market_clusters
+    clusters = []
+    for item in mc:
+        members = [c for c in item.extra["members"]
+                   if c in from_signals or c in from_spaces]
+        clusters.append({
+            "id": item.id,
+            "label": item.label,
+            "countries": members,
+            "source": item.extra["source"],
+            "signals": sum(from_signals.get(c, 0) for c in members),
+            "spaces": sum(from_spaces.get(c, 0) for c in members),
+        })
+    clusters.sort(key=lambda c: (-c["signals"], c["id"]))
     total_live = _db.query_one(
         f"SELECT COUNT(*) n FROM opportunity_spaces WHERE merged_into IS NULL "
         f"AND state IN ({placeholders})", _GENERATION_STATES
     )["n"]
-    return {"geographies": geographies, "total_live": total_live,
+    return {"geographies": geographies, "market_clusters": clusters,
+            "unmapped_geographies": mc.unmapped(set(from_signals) | set(from_spaces)),
+            "total_live": total_live,
             "min_brief_chars": MIN_BRIEF_CHARS, "max_brief_chars": MAX_BRIEF_CHARS,
             **_generation.readiness()}
 
@@ -1560,6 +1626,7 @@ def generation_matching(
     vertical: list[str] | None = Query(None),
     domain: list[str] | None = Query(None),
     geography: list[str] | None = Query(None),
+    market_cluster: list[str] | None = Query(None),
     horizon: list[str] | None = Query(None),
     limit: int = Query(60, ge=1, le=500),
 ) -> dict[str, Any]:
@@ -1575,7 +1642,7 @@ def generation_matching(
     carrying no geography is global rather than excluded, which is the same rule
     constrained synthesis validates candidates against.
     """
-    filters = _generation_filters(vertical, domain, geography, horizon)
+    filters = _generation_filters(vertical, domain, geography, horizon, market_cluster)
     topics = _read.topics(states=_GENERATION_STATES)
     matched = [t for t in topics if matches_filters(t, filters)]
     matched.sort(key=lambda t: (t.get("attractiveness") or {}).get("score", 0.0), reverse=True)
@@ -1592,9 +1659,15 @@ def generation_matching(
 @app.post("/api/generate")
 def start_generation(payload: GenerateIn) -> dict[str, Any]:
     """Start a constrained generation run (background; poll the job)."""
+    unknown = [c for c in payload.market_clusters if c not in _cfg.market_clusters]
+    if unknown:
+        raise HTTPException(
+            400, f"Unknown market cluster(s) {unknown}. Known: {_cfg.market_clusters.ids}"
+        )
+    geographies = _expand_clusters(payload.geographies, payload.market_clusters)
     constraints = GenerationConstraints.from_dict({
         "verticals": payload.verticals, "domains": payload.domains,
-        "geographies": payload.geographies, "horizons": payload.horizons,
+        "geographies": geographies, "horizons": payload.horizons,
     })
     try:
         job = _generation.start(payload.count, constraints,
