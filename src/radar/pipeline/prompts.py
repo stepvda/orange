@@ -1233,7 +1233,9 @@ evidence exists. What you SHOULD do is put the brief forward with `ready` false,
 so the person can build it on what THEY know: their own account is then recorded
 as dated, attributable internal evidence and the space rests on that instead.
 Say so in your reply — "the radar has nothing on this, but you clearly do; I can
-build it on what you have told me" — and fill `hypothesis_rationale`.
+build it on what you have told me" — and fill `hypothesis_rationale`. Say it in
+the REPLY, which is conversation, and never inside `hypothesis_rationale`, which
+becomes evidence.
 
 WHAT TO DO WITH THE EVIDENCE
 *   State what the corpus holds, referring to signals by their ids, and only
@@ -1332,12 +1334,18 @@ OUTPUT — a single JSON object, nothing else:
       "technology": "<technology id>",
       "geographies": ["<ISO code>", ...],
       "rationale": "<one sentence: which retrieved signals make this worth running>",
-      "hypothesis_rationale": "<REQUIRED when ready is false. What THIS PERSON has
-        told you that the corpus does not carry — who is asking, what they want,
-        what is stopping them — in their terms, as a paragraph a colleague could
-        act on. It is recorded under their name as internal evidence and the
-        space will cite it, so it must be what they actually said and nothing you
-        have supplied. Null when ready is true.>"
+      "hypothesis_rationale": "<REQUIRED when ready is false. THE BUSINESS FACTS
+        THIS PERSON HAS GIVEN YOU, written as their own first-hand account: who
+        is asking, what they want to do, what is stopping them, what they would
+        buy and from whom. Their terms, a paragraph a colleague could act on.
+
+        NEVER MENTION THE CORPUS, the radar, the evidence, coverage, or what is
+        or is not in the data. Not one clause. This text is recorded as a signal
+        and the space's claims will CITE it, so a sentence like 'this is not
+        directly covered by the corpus' becomes a piece of evidence stating that
+        there is no evidence — and the critic then rejects the very space it was
+        written to support. Write only what is true about the market, as if you
+        were writing up a customer meeting. Null when ready is true.>"
     }}
   ]
 }}
