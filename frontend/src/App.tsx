@@ -11,12 +11,13 @@ import GenerateScreen from './components/Generate'
 import SpaceFullscreen from './components/Fullscreen'
 import PlannerScreen from './components/Planner'
 import ScoreExplainModal from './components/ScoreExplain'
+import HowBuilt from './components/HowBuilt'
 import { LoginScreen, PasswordDialog } from './components/Login'
 import { useAnnounce } from './components/Announcer'
 import {
   IconAutoTheme, IconBars, IconBoard, IconCalendar, IconClipboard, IconCompass,
   IconCoverageGrid, IconDoc, IconList, IconMoon, IconPanel, IconPerson, IconRadar,
-  IconSignOut, IconSpark, IconSun, IconTag, IconWhitespace,
+  IconRoute, IconSignOut, IconSpark, IconSun, IconTag, IconWhitespace,
 } from './components/Icons'
 import { formatEur } from './components/MarketSize'
 import { api, setSessionEndedHandler } from './api'
@@ -253,6 +254,10 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>(initial.theme)
   const [help, setHelp] = useState<string | null>(null)
+  // The method explainer. Separate from `help`, which is a lookup keyed by
+  // topic: this one is a single long-form page about the pipeline as a whole,
+  // and it is reached from the radar rather than from a heading.
+  const [howBuilt, setHowBuilt] = useState(false)
   const [explaining, setExplaining] = useState<Topic | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null)
   const [layout, setLayout] = useState(loadLayout)
@@ -907,6 +912,18 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                 <RadarLegend />
                 <RadarChart topics={shown} domains={meta.domains}
                             selectedId={selected} onSelect={selectAndShow} />
+                {/* The plot is the product's one claim to authority, and a
+                    reader's first question about it is where the dots came
+                    from. The answer sits under the picture that raised the
+                    question rather than behind a "?" in the heading, because
+                    it is a page, not a definition. */}
+                <div className="hb-trigger-row">
+                  <button type="button" className="hb-trigger"
+                          onClick={() => setHowBuilt(true)}>
+                    <IconRoute />
+                    How was the radar created?
+                  </button>
+                </div>
               </div>
               <ShowMore view={view} limit={limit} setLimit={setLimit} />
             </div>
@@ -1490,6 +1507,7 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
       )}
 
       <HelpModal topic={help} onClose={() => setHelp(null)} />
+      <HowBuilt open={howBuilt} onClose={() => setHowBuilt(false)} meta={meta} />
       <ScoreExplainModal
         topic={explaining}
         weights={{ attractiveness: meta.attractiveness_weights, right_to_win: meta.right_to_win_weights }}
