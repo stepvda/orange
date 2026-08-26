@@ -18,6 +18,7 @@ Division of labour follows Table 23 exactly:
 
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import logging
 import math
@@ -27,7 +28,7 @@ from typing import Any
 
 from .config import Config
 from .db import Database, js, unjs
-from .graph import LINK_DISTANCE, Linker
+from .graph import Linker
 from .llm import LLMClient
 from .pipeline import prompts
 
@@ -494,6 +495,11 @@ def derive_horizon(cfg: Config, topic: dict, signals: list[dict], reference_date
     """
     horizon_cfg = cfg.settings["horizon"]
     now_months = int(horizon_cfg["now_max_months"])
+    # NFR-11: thresholds are configuration, not code. This one was read and then
+    # ignored — test 1 below compared against a hard-coded 365 days, so moving
+    # `now_max_months` in settings.yaml changed nothing and the docstring, the
+    # config and the behaviour could disagree without anybody noticing.
+    now_window_days = (reference_date - _months_before(reference_date, now_months)).days
 
     by_type = Counter(s.get("signal_type") for s in signals)
     procurement = [s for s in signals if s.get("signal_type") == "buying_signal"]
@@ -503,16 +509,18 @@ def derive_horizon(cfg: Config, topic: dict, signals: list[dict], reference_date
 
     recent_procurement = [
         s for s in procurement
-        if (published := _as_date(s.get("published_at"))) and (reference_date - published).days <= 365
+        if (published := _as_date(s.get("published_at")))
+        and (reference_date - published).days <= now_window_days
     ]
 
     # Test 1 — Now: budgeted procurement inside the window.
     if recent_procurement:
         return {
             "value": "now",
-            "basis": "budgeted_procurement_within_12_months",
+            "basis": f"budgeted_procurement_within_{now_months}_months",
             "anchor_date": None,
-            "test_applied": f"{len(recent_procurement)} procurement signal(s) within 12 months of the reference date",
+            "test_applied": (f"{len(recent_procurement)} procurement signal(s) within "
+                             f"{now_months} months of the reference date"),
             "evidence": [s["id"] for s in recent_procurement[:5]],
         }
 
@@ -777,6 +785,19 @@ class ScoringEngine:
                 scored += 1
 
         return {"scored": scored, "state_changes": state_changes, "corpus_max_signals": corpus_max}
+
+
+def _months_before(reference: dt.date, months: int) -> dt.date:
+    """`reference` less `months` calendar months, landing on a day that exists.
+
+    Calendar months rather than `months * 30`: the config is written in months
+    because that is how a procurement cycle is discussed, and 12 of them is a
+    year on the calendar whether or not it is a leap one.
+    """
+    total = reference.year * 12 + (reference.month - 1) - max(0, months)
+    year, month = divmod(total, 12)
+    day = min(reference.day, calendar.monthrange(year, month + 1)[1])
+    return dt.date(year, month + 1, day)
 
 
 def _as_date(value: Any) -> dt.date | None:

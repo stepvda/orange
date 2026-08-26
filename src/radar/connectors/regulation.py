@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Any, Iterator
+from typing import Iterator
 
 from .base import CollectedItem, Connector, clean_text, parse_date, register
 

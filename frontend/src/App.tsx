@@ -11,12 +11,13 @@ import GenerateScreen from './components/Generate'
 import SpaceFullscreen from './components/Fullscreen'
 import PlannerScreen from './components/Planner'
 import ScoreExplainModal from './components/ScoreExplain'
+import HowBuilt from './components/HowBuilt'
 import { LoginScreen, PasswordDialog } from './components/Login'
 import { useAnnounce } from './components/Announcer'
 import {
   IconAutoTheme, IconBars, IconBoard, IconCalendar, IconClipboard, IconCompass,
   IconCoverageGrid, IconDoc, IconList, IconMoon, IconPanel, IconPerson, IconRadar,
-  IconSignOut, IconSpark, IconSun, IconTag, IconWhitespace,
+  IconRoute, IconSignOut, IconSpark, IconSun, IconTag, IconWhitespace,
 } from './components/Icons'
 import { formatEur } from './components/MarketSize'
 import { api, setSessionEndedHandler } from './api'
@@ -253,6 +254,10 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<'auto' | 'light' | 'dark'>(initial.theme)
   const [help, setHelp] = useState<string | null>(null)
+  // The method explainer. Separate from `help`, which is a lookup keyed by
+  // topic: this one is a single long-form page about the pipeline as a whole,
+  // and it is reached from the radar rather than from a heading.
+  const [howBuilt, setHowBuilt] = useState(false)
   const [explaining, setExplaining] = useState<Topic | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null)
   const [layout, setLayout] = useState(loadLayout)
@@ -403,15 +408,22 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
 
   useEffect(() => { setLimit(null) }, [role, filters, sort])
 
+  // White space is the one tab the rail drives, so it — and only it — refetches
+  // on a filter change.
   useEffect(() => {
-    if (tab === 'whitespace') {
-      // Refetched on every filter change: the rail is visible on this tab, so
-      // it has to mean something here too.
-      api.whitespace(filters).then((w) => {
-        setWhitespace(w.topics)
-        setWhitespaceTotal(w.total_unfiltered)
-      }).catch(() => {})
-    }
+    if (tab !== 'whitespace') return
+    api.whitespace(filters).then((w) => {
+      setWhitespace(w.topics)
+      setWhitespaceTotal(w.total_unfiltered)
+    }).catch(() => {})
+  }, [tab, filters, refreshKey])
+
+  // The corpus-level tabs. Split from the effect above because `filters` was in
+  // its dependency list for white space's sake, and every one of these endpoints
+  // ignores filters — so typing in the search box while Analytics was open
+  // refetched four unfiltered aggregates per keystroke, each of which assembles
+  // the whole topic set server-side, to redraw identical charts.
+  useEffect(() => {
     if (tab === 'coverage' && !coverage) {
       api.coverage().then(setCoverage).catch(() => {})
     }
@@ -424,7 +436,7 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
       fetch('/api/divergence').then((r) => r.json()).then((d) => setDivergent(d.topics ?? [])).catch(() => {})
       fetch('/api/analytics/market-size').then((r) => r.json()).then(setSizing).catch(() => {})
     }
-  }, [tab, coverage, role, refreshKey, filters])
+  }, [tab, coverage, role, refreshKey])
 
   // The exploration slot is shown INSIDE the list, marked, so the randomised
   // sample actually gets seen — that is the point of the remedy (§4.7.6).
@@ -907,6 +919,18 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
                 <RadarLegend />
                 <RadarChart topics={shown} domains={meta.domains}
                             selectedId={selected} onSelect={selectAndShow} />
+                {/* The plot is the product's one claim to authority, and a
+                    reader's first question about it is where the dots came
+                    from. The answer sits under the picture that raised the
+                    question rather than behind a "?" in the heading, because
+                    it is a page, not a definition. */}
+                <div className="hb-trigger-row">
+                  <button type="button" className="hb-trigger"
+                          onClick={() => setHowBuilt(true)}>
+                    <IconRoute />
+                    How was the radar created?
+                  </button>
+                </div>
               </div>
               <ShowMore view={view} limit={limit} setLimit={setLimit} />
             </div>
@@ -1490,6 +1514,7 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
       )}
 
       <HelpModal topic={help} onClose={() => setHelp(null)} />
+      <HowBuilt open={howBuilt} onClose={() => setHowBuilt(false)} meta={meta} />
       <ScoreExplainModal
         topic={explaining}
         weights={{ attractiveness: meta.attractiveness_weights, right_to_win: meta.right_to_win_weights }}

@@ -257,3 +257,48 @@ export const IconSignOut = svg(<>
   <path d="M14.5 4.5H6.6A1.6 1.6 0 0 0 5 6.1v11.8a1.6 1.6 0 0 0 1.6 1.6h7.9" />
   <path d="M15.4 8.4 19 12l-3.6 3.6M19 12h-8.6" />
 </>)
+
+/* --- "How the radar was created" ---------------------------------------- *
+ *
+ * Same 24-box and 1.7 stroke as everything above. These name PIPELINE STAGES
+ * rather than sections of a topic, so none of them could be borrowed from the
+ * set above without the mark meaning two different things in two places.
+ */
+
+/** The trigger link. A route between two nodes, because that is literally what
+ *  the modal explains: the path from a public document to a mark on the plot. */
+export const IconRoute = svg(<>
+  <circle cx="5.4" cy="18.6" r="2.2" /><circle cx="18.6" cy="5.4" r="2.2" />
+  <path d="M7.6 18.6h5.4a3.5 3.5 0 0 0 0-7H9.6a3.5 3.5 0 0 1 0-7h6.8" />
+</>)
+
+/** Collect — incoming signal, drawn as the waves rather than a dish, since the
+ *  stage pulls from forty-odd feeds and none of them look like an antenna. */
+export const IconWaves = svg(<>
+  <path d="M4 20a12.5 12.5 0 0 1 12.5-12.5" /><path d="M4 20a8.4 8.4 0 0 1 8.4-8.4" />
+  <path d="M4 20a4.3 4.3 0 0 1 4.3-4.3" /><path d="M4 20h.01" />
+</>)
+
+/** Normalise, de-duplicate, gate and tier — the stage that throws things away. */
+export const IconFunnel = svg(<>
+  <path d="M3.6 4.6h16.8l-6.5 7.6v6.4l-3.8 2.2v-8.6z" />
+</>)
+
+/** Cluster — groups discovered in the data, so dashed hulls around dots: the
+ *  boundary is derived, not drawn by anyone. */
+export const IconCluster = svg(<>
+  <circle cx="8.6" cy="8.8" r="5.3" strokeDasharray="2.4 2.4" />
+  <circle cx="16.8" cy="16.6" r="4.2" strokeDasharray="2.4 2.4" />
+  <path d="M6.9 7.6h.01M10.4 7.4h.01M8.5 11h.01M15.6 15.4h.01M18.2 17.6h.01" />
+</>)
+
+/** The guardrails — a shield with a check, for the four hallucination defences. */
+export const IconShield = svg(<>
+  <path d="M12 3.2 19.4 6v6.2c0 4.4-3.1 7.1-7.4 8.6-4.3-1.5-7.4-4.2-7.4-8.6V6z" />
+  <path d="m9 12.1 2.2 2.2 4.1-4.5" />
+</>)
+
+/** The refresh cadence — the same topics updated, not a new list every time. */
+export const IconRefresh = svg(<>
+  <path d="M20.4 12a8.4 8.4 0 1 1-2.5-6" /><path d="M20.4 4.5V10h-5.5" />
+</>)

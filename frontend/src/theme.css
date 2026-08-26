@@ -2286,3 +2286,210 @@ a.chat-ev-body:hover .chat-ev-title { color: var(--accent-text); text-decoration
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .filter-item:hover .filter-item-sub { color: var(--text-secondary); }
+
+/* ---------- "How the radar was created" (the pipeline explainer) ----------
+ *
+ * A wide modal, deliberately: the pipeline diagram is a four-column flow and
+ * the step cards read two-up. At 620px — the width of every other help dialog —
+ * the diagram would either shrink below legible type or scroll horizontally on
+ * a desktop, and neither is acceptable for the page that explains the method.
+ *
+ * Everything here uses the existing tokens, so both themes are covered by the
+ * palettes already validated at the top of this file. */
+
+.hb-trigger {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin: 0 auto; padding: 7px 14px;
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  background: none; border: 1px dashed var(--border-strong);
+  border-radius: 999px; color: var(--text-secondary);
+}
+.hb-trigger:hover { border-color: var(--accent); color: var(--accent-text); border-style: solid; }
+.hb-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hb-trigger svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.hb-trigger-row {
+  display: flex; justify-content: center;
+  padding: 10px 16px 14px; border-top: 1px solid var(--border);
+}
+
+.hb-modal { max-width: 1040px; max-height: 88vh; }
+/* The sticky header and footer need a z-index, not just a background. A sticky
+   element with `z-index: auto` still paints in DOM order, so any POSITIONED
+   descendant further down — the source bullets below use `position: relative` —
+   scrolls straight over the top of it. The other dialogs have no positioned
+   children and so never exposed this. */
+.hb-modal .help-head { align-items: flex-start; z-index: 2; }
+.hb-modal .help-head > button { margin-top: 1px; }
+.hb-lede {
+  margin: 4px 0 0; font-size: 12.5px; line-height: 1.5;
+  color: var(--text-secondary); max-width: 660px;
+}
+.hb-body {
+  padding: 18px 22px 6px; font-size: 13px; line-height: 1.62; color: var(--text-secondary);
+}
+.hb-body > p { margin: 0 0 14px; max-width: 78ch; }
+.hb-body b { color: var(--text-primary); font-weight: 620; }
+.hb-body code {
+  font-family: var(--mono); font-size: 11.5px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px;
+}
+
+.hb-h {
+  display: flex; align-items: center; gap: 8px;
+  margin: 26px 0 9px; font-size: 12px; font-weight: 650;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted);
+}
+.hb-h:first-child { margin-top: 0; }
+.hb-h::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+.hb-h-icon { width: 15px; height: 15px; flex: 0 0 auto; color: var(--accent-text); }
+
+/* Diagrams scroll inside their own box rather than shrinking their own type or
+   pushing the dialog sideways. */
+.hb-scroll { overflow-x: auto; margin: 0 0 14px; padding-bottom: 2px; }
+.hb-svg { width: 100%; height: auto; display: block; }
+
+.hb-d-badge { font-family: var(--mono); font-size: 12px; font-weight: 650; fill: var(--accent-text); }
+.hb-d-title { font-size: 13px; font-weight: 650; fill: var(--text-primary); }
+.hb-d-sub   { font-size: 10.5px; fill: var(--text-muted); }
+.hb-d-stage { font-family: var(--mono); font-size: 11px; fill: var(--text-secondary); }
+.hb-d-out   { font-size: 10.5px; fill: var(--text-muted); }
+
+.hb-f-label { font-size: 12px; font-weight: 620; fill: var(--text-primary); }
+.hb-f-note  { font-size: 10px; fill: var(--text-muted); }
+.hb-f-gate  { font-size: 10.5px; font-family: var(--mono); fill: var(--text-muted); }
+
+.hb-caption { font-size: 11px; color: var(--text-muted); margin: -8px 0 14px; }
+
+/* Two-up step cards. They are read in order, so the grid is row-major and the
+   numbers stay a reading aid rather than decoration. */
+.hb-steps {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px; margin-bottom: 6px;
+}
+.hb-step-wide { grid-column: 1 / -1; }
+.hb-step-wide .hb-step-body { max-width: 82ch; }
+.hb-step {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2); padding: 11px 13px 12px;
+}
+.hb-step-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.hb-step-head h5 { margin: 0; font-size: 13px; font-weight: 650; color: var(--text-primary); }
+.hb-step-n {
+  flex: 0 0 auto; width: 19px; height: 19px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 650;
+  color: var(--accent-ink); background: var(--accent);
+}
+.hb-step-icon { width: 16px; height: 16px; flex: 0 0 auto; color: var(--text-muted); }
+.hb-step-body p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.58; }
+.hb-step-body p:last-child { margin-bottom: 0; }
+/* The second paragraph of a step is the "why it is built that way" note. It is
+   set apart rather than merged, so a reader can take the first line of each card
+   and still have read the pipeline. */
+.hb-tech {
+  border-left: 2px solid var(--border-strong); padding-left: 9px;
+  color: var(--text-muted); font-size: 12px !important;
+}
+.hb-w { font-family: var(--mono); font-size: 11px; color: var(--accent-text); }
+
+/* The two questions the radar keeps apart, set side by side so the separation is
+   visible before it is argued. Two cards, not a paragraph with a semicolon. */
+.hb-two-qs {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px; margin: 0 0 14px;
+}
+.hb-two-qs > div {
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm); background: var(--surface-2);
+  padding: 11px 13px; font-size: 12.5px; line-height: 1.58;
+}
+.hb-q-tag {
+  display: block; margin-bottom: 5px; font-size: 12.5px; font-weight: 650;
+  color: var(--text-primary);
+}
+
+/* Glossary. Six terms the rest of the page leans on; a two-column definition
+   list rather than prose, because it is looked up rather than read. */
+.hb-gloss {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 20px; margin: 0 0 16px;
+}
+.hb-gloss > div {
+  padding: 7px 0 8px; border-bottom: 1px solid var(--border);
+}
+.hb-gloss dt {
+  font-size: 12.5px; font-weight: 650; color: var(--text-primary); margin-bottom: 2px;
+}
+.hb-gloss dd { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-muted); }
+
+/* What each family of sources is FOR. The reason a source is on the list is more
+   informative to a lay reader than the name of the source, so the name is the
+   aside and the reason is the sentence. */
+.hb-sources { margin: 0 0 8px; padding: 0; list-style: none; }
+.hb-sources li {
+  position: relative; padding-left: 14px; margin-bottom: 5px;
+  font-size: 12.5px; line-height: 1.55;
+}
+.hb-sources li::before {
+  content: ''; position: absolute; left: 2px; top: 8px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+}
+.hb-step-body .hb-sources li:last-child { margin-bottom: 0; }
+
+/* The four hallucination defences. Numbered because they are ranked by
+   effectiveness, not merely enumerated — that ordering is the claim. */
+.hb-defences {
+  margin: 0 0 14px; padding: 0; list-style: none; counter-reset: hb-d;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+}
+.hb-defences li {
+  counter-increment: hb-d; position: relative;
+  padding: 10px 12px 11px 34px; font-size: 12.5px; line-height: 1.58;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.hb-defences li::before {
+  content: counter(hb-d); position: absolute; left: 11px; top: 10px;
+  width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 650;
+  color: var(--accent-text); border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.hb-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 620px; }
+.hb-table th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-muted); font-weight: 600; padding: 5px 8px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.hb-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.hb-table tr:last-child td { border-bottom: none; }
+.hb-why { color: var(--text-muted); }
+/* "Model?" is a yes/no that a reader will scan down the column, so it carries a
+   word as well as a colour — the reserved status scale is never used alone. */
+.hb-flag {
+  font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--text-muted);
+}
+.hb-flag[data-model] {
+  border-color: var(--status-warn); color: var(--status-warn);
+  background: color-mix(in srgb, var(--status-warn) 10%, transparent);
+}
+
+.hb-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+  padding: 11px 22px; border-top: 1px solid var(--border);
+  position: sticky; bottom: 0; z-index: 2; background: var(--surface-1);
+  font-size: 11px; color: var(--text-muted);
+}
+.hb-foot i { font-style: normal; text-transform: uppercase; letter-spacing: .06em;
+             font-size: 9.5px; margin-right: 6px; }
+.hb-foot code { font-family: var(--mono); font-size: 11px; color: var(--text-secondary); }
+.hb-foot-note { flex: 1 1 260px; min-width: 0; line-height: 1.45; }
+
+@media (max-width: 860px) {
+  .hb-steps, .hb-defences, .hb-two-qs, .hb-gloss { grid-template-columns: minmax(0, 1fr); }
+  .hb-body > p { max-width: none; }
+}
