@@ -12,15 +12,25 @@ data/*
 archive/
 .cache/
 
-# The radar database is NOT committed: at 121 MB it exceeds GitHub's hard 100 MB
-# per-file limit, so a push carrying it is rejected outright. It is also rebuilt
-# by every pipeline run, and the deployed instance is seeded from the package the
-# deploy script builds (scripts/deploy-azure.sh), not from the repository.
+# The radar database is not committed as a raw file: at ~126 MB it exceeds
+# GitHub's hard 100 MB per-file limit, so a push carrying it is rejected
+# outright. What is committed is data/db-archive/ — the same database taken with
+# VACUUM INTO (a plain copy of a WAL-mode file can miss committed pages) and
+# deflated into a split zip whose parts are capped at 25 MB, comfortably under
+# GitHub's 50 MB warning as well as the hard limit. Build it with
+# scripts/db-archive-pack.sh, unpack it with scripts/db-archive-restore.sh.
 #
-# The rows that genuinely cannot be regenerated — feedback, assessments, stage
-# moves — are the reason the negation used to be here. They still need a home:
-# a small, diffable export of those tables, not a 121 MB binary blob.
+# The archive is a convenience copy, not the source of truth. The database is
+# rebuilt by every pipeline run, and the deployed instance is seeded from the
+# package the deploy script builds (scripts/deploy-azure.sh), not from the
+# repository — so re-run the pack script when the committed copy should catch
+# up, and expect a fresh ~30 MB blob in history each time it does.
 *.db
+
+# The split archive itself. `data/*` above stops git descending into data/, so
+# the directory has to be re-included before its contents can be.
+!data/db-archive/
+!data/db-archive/**
 
 # Python
 __pycache__/
