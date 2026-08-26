@@ -1373,15 +1373,26 @@ class Synthesiser:
 
     @staticmethod
     def _next_id(cur) -> str:
+        """The next free OSnnn, ordered NUMERICALLY rather than as text.
+
+        `ORDER BY id DESC` sorts a TEXT primary key lexicographically, where
+        'OS999' outranks 'OS1000'. The corpus is at OS458 and grows every run, so
+        the 1000th space would have been minted as 'OS1000' and the 1001st would
+        have asked the same question, got 'OS999' back again, and tried to insert
+        'OS1000' a second time — a UNIQUE constraint failure that rolls back the
+        whole synthesis batch, not just the one candidate.
+
+        `GLOB 'OS[0-9]*'` keeps the CAST honest: a manually created id like
+        'OS-test' would otherwise cast to 0 and silently take part in the max.
+        """
         row = cur.execute(
-            "SELECT id FROM opportunity_spaces WHERE id LIKE 'OS%' ORDER BY id DESC LIMIT 1"
+            "SELECT MAX(CAST(SUBSTR(id, 3) AS INTEGER)) AS highest "
+            "FROM opportunity_spaces WHERE id GLOB 'OS[0-9]*'"
         ).fetchone()
-        if not row:
-            return "OS001"
-        try:
-            return f"OS{int(row['id'][2:]) + 1:03d}"
-        except ValueError:
-            return f"OS{dt.datetime.now().strftime('%H%M%S')}"
+        highest = (row["highest"] if row else None) or 0
+        # :03d pads to OS001 and stops padding at OS1000, which is what the
+        # ordering above now reads back correctly.
+        return f"OS{int(highest) + 1:03d}"
 
 
 def _merge_claims(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> list[dict[str, Any]]:

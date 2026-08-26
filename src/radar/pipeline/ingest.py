@@ -83,6 +83,10 @@ class Ingestor:
         self.max_extract = ing["max_extract_chars"]
         self.archive_raw = ing.get("archive_raw", True)
         self._relevance_terms = self._build_relevance_terms()
+        #: The dedup index, built once per Ingestor and kept in step by `_store`.
+        #: See `_dedup_index` for why it is not a query.
+        self._seen_urls: set[str] | None = None
+        self._seen_content: set[str] = set()
 
     # -- stage 1 -----------------------------------------------------------
 
@@ -160,6 +164,50 @@ class Ingestor:
 
     # -- stage 2 -----------------------------------------------------------
 
+    @staticmethod
+    def _content_key(publisher: str, extract: str) -> str:
+        """The identity a syndicated duplicate shares: same publisher, same words."""
+        return hashlib.blake2b(
+            f"{publisher}\x00{extract}".encode("utf-8", "replace"), digest_size=16
+        ).hexdigest()
+
+    def _dedup_index(self) -> set[str]:
+        """URLs already in the signal store, loaded once for the whole run.
+
+        The check used to be one query per collected item:
+
+            SELECT id FROM signals WHERE url = ? OR (publisher = ? AND extract = ?)
+
+        which SQLite plans as a full table SCAN — the `OR` defeats
+        `idx_signals_url`, and there is no index the second branch could use
+        because `extract` is a 1,200-character column nobody would want one on.
+        At 11,500 signals that is ~8 ms per item, and both sides of it grow: a
+        refresh collecting n items against a corpus of m signals did O(n*m) work,
+        so the dedup step got slower every week for the same amount of new
+        evidence.
+
+        Writes are serial on the calling thread (see `collect`), so the set can
+        simply be read once and kept in step by `_store`. Same rule, two lookups
+        that cost nothing.
+        """
+        if self._seen_urls is None:
+            self._seen_urls = set()
+            # Streamed rather than fetched whole. What is KEPT is small — a URL
+            # and a 32-character digest per signal — but `extract` is up to
+            # 1,200 characters, so materialising the table to build the set
+            # would hold tens of megabytes of text that is thrown away a row
+            # later, and would keep growing with the corpus.
+            conn = self.db.connect()
+            try:
+                for url, publisher, extract in conn.execute(
+                        "SELECT url, publisher, extract FROM signals"):
+                    if url:
+                        self._seen_urls.add(url)
+                    self._seen_content.add(self._content_key(publisher or "", extract or ""))
+            finally:
+                conn.close()
+        return self._seen_urls
+
     def _store(self, items: Iterable[CollectedItem], source: dict[str, Any],
                refresh_id: str, stats: IngestStats) -> None:
         now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
@@ -191,12 +239,17 @@ class Ingestor:
                 content_hash = item.content_hash()
                 raw_id = item.raw_id()
 
-                # Deduplicate by URL and content hash (Table 16 stage 2).
-                existing = cur.execute(
-                    "SELECT id FROM signals WHERE url = ? OR (publisher = ? AND extract = ?) LIMIT 1",
-                    (item.url, item.publisher, item.extract),
-                ).fetchone()
-                if existing:
+                # Deduplicate by URL and by (publisher, extract) — Table 16
+                # stage 2, unchanged. Only where the answer comes from has moved:
+                # see `_dedup_index`.
+                seen_urls = self._dedup_index()
+                # `item.publisher or item.source_id` is what the INSERT below
+                # actually stores, so it is what the index has to be probed with.
+                # The old query compared the raw `item.publisher`, which is empty
+                # for every source that does not name one — those items could
+                # never match their own stored duplicate.
+                content_key = self._content_key(item.publisher or item.source_id, item.extract)
+                if (item.url and item.url in seen_urls) or content_key in self._seen_content:
                     stats.duplicates += 1
                     continue
 
@@ -233,6 +286,11 @@ class Ingestor:
                 )
                 if cur.rowcount:
                     stats.new_signals += 1
+                    # Kept in step as the row lands, so two items inside one
+                    # batch still deduplicate against each other.
+                    if item.url:
+                        seen_urls.add(item.url)
+                    self._seen_content.add(content_key)
                 else:
                     stats.duplicates += 1
 

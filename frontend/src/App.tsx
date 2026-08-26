@@ -408,15 +408,22 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
 
   useEffect(() => { setLimit(null) }, [role, filters, sort])
 
+  // White space is the one tab the rail drives, so it — and only it — refetches
+  // on a filter change.
   useEffect(() => {
-    if (tab === 'whitespace') {
-      // Refetched on every filter change: the rail is visible on this tab, so
-      // it has to mean something here too.
-      api.whitespace(filters).then((w) => {
-        setWhitespace(w.topics)
-        setWhitespaceTotal(w.total_unfiltered)
-      }).catch(() => {})
-    }
+    if (tab !== 'whitespace') return
+    api.whitespace(filters).then((w) => {
+      setWhitespace(w.topics)
+      setWhitespaceTotal(w.total_unfiltered)
+    }).catch(() => {})
+  }, [tab, filters, refreshKey])
+
+  // The corpus-level tabs. Split from the effect above because `filters` was in
+  // its dependency list for white space's sake, and every one of these endpoints
+  // ignores filters — so typing in the search box while Analytics was open
+  // refetched four unfiltered aggregates per keystroke, each of which assembles
+  // the whole topic set server-side, to redraw identical charts.
+  useEffect(() => {
     if (tab === 'coverage' && !coverage) {
       api.coverage().then(setCoverage).catch(() => {})
     }
@@ -429,7 +436,7 @@ function RadarApp({ user, minPasswordLength, onSignedOut, onUserChanged }: Radar
       fetch('/api/divergence').then((r) => r.json()).then((d) => setDivergent(d.topics ?? [])).catch(() => {})
       fetch('/api/analytics/market-size').then((r) => r.json()).then(setSizing).catch(() => {})
     }
-  }, [tab, coverage, role, refreshKey, filters])
+  }, [tab, coverage, role, refreshKey])
 
   // The exploration slot is shown INSIDE the list, marked, so the randomised
   // sample actually gets seen — that is the point of the remedy (§4.7.6).

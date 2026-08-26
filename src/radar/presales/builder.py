@@ -30,6 +30,7 @@ import hashlib
 import logging
 import os
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from ..config import Config
@@ -207,18 +208,41 @@ class PreSalesBuilder:
 # Read side
 # ---------------------------------------------------------------------------
 
-def _build_state(db: Database, topic_id: str, row: Any) -> dict[str, Any]:
+def _freshness(db: Database) -> "Callable[[str], tuple[Any, Any, Any]]":
+    """A per-topic staleness reading, memoised for the life of one request.
+
+    The three things a build is compared against — the space's version, when the
+    description was last written, when the size was last computed — are
+    properties of the TOPIC, not of the build. `_build_state` asked for all
+    three on every row, and `collateral_for_topic` walks twelve catalogue
+    entries with up to six formats each: forty-eight SQLite connections to
+    answer one tab, for three values that are the same in all of them.
+    """
+    cache: dict[str, tuple[Any, Any, Any]] = {}
+
+    def read(topic_id: str) -> tuple[Any, Any, Any]:
+        if topic_id not in cache:
+            cache[topic_id] = (
+                db.query_one("SELECT version FROM opportunity_spaces WHERE id = ?", (topic_id,)),
+                db.query_one("SELECT generated_at FROM topic_descriptions "
+                             "WHERE opportunity_id = ?", (topic_id,)),
+                db.query_one("SELECT MAX(computed_at) AS at FROM market_sizes "
+                             "WHERE opportunity_id = ?", (topic_id,)),
+            )
+        return cache[topic_id]
+
+    return read
+
+
+def _build_state(db: Database, topic_id: str, row: Any,
+                 freshness: "Callable[[str], tuple[Any, Any, Any]] | None" = None) -> dict[str, Any]:
     """What has been built in one format, and the three ways it can be stale.
 
     Reported separately because they need different actions: rebuild,
     regenerate the narrative first, or re-run sizing first. "Out of date" alone
     tells the reader nothing they can act on.
     """
-    topic = db.query_one("SELECT version FROM opportunity_spaces WHERE id = ?", (topic_id,))
-    description = db.query_one(
-        "SELECT generated_at FROM topic_descriptions WHERE opportunity_id = ?", (topic_id,))
-    size = db.query_one(
-        "SELECT MAX(computed_at) AS at FROM market_sizes WHERE opportunity_id = ?", (topic_id,))
+    topic, description, size = (freshness or _freshness(db))(topic_id)
 
     reasons = []
     if topic and row["topic_version"] != topic["version"]:
@@ -253,13 +277,20 @@ def _build_state(db: Database, topic_id: str, row: Any) -> dict[str, Any]:
     }
 
 
-def item_for(db: Database, topic_id: str, kind: str) -> dict[str, Any] | None:
-    """One catalogue entry, with whatever has been built for it in any format."""
+def item_for(db: Database, topic_id: str, kind: str,
+             freshness: "Callable[[str], tuple[Any, Any, Any]] | None" = None) -> dict[str, Any] | None:
+    """One catalogue entry, with whatever has been built for it in any format.
+
+    `freshness` lets a caller walking the whole catalogue read the topic's
+    staleness inputs once instead of once per build — see `_freshness`. Omitted,
+    it reads them itself, so a single-entry caller is unchanged.
+    """
     spec = entry(kind)
+    freshness = freshness or _freshness(db)
     rows = db.query(
         "SELECT * FROM topic_collateral WHERE opportunity_id = ? AND kind = ? ORDER BY fmt",
         (topic_id, kind))
-    builds = {row["fmt"]: _build_state(db, topic_id, row) for row in rows}
+    builds = {row["fmt"]: _build_state(db, topic_id, row, freshness) for row in rows}
     default = formats_for(kind)[0]
     # The headline state is the DEFAULT format's, falling back to whatever else
     # exists — so a row that has only been built as Word still reads as built.
@@ -301,7 +332,8 @@ def collateral_for_topic(db: Database, topic_id: str) -> list[dict[str, Any]]:
     could be produced as much as what has been, and a screen that shows nothing
     until something is built is a screen nobody presses a button on.
     """
-    return [item_for(db, topic_id, spec["kind"]) or {} for spec in CATALOGUE]
+    freshness = _freshness(db)
+    return [item_for(db, topic_id, spec["kind"], freshness) or {} for spec in CATALOGUE]
 
 
 def collateral_path(db: Database, topic_id: str, kind: str,
