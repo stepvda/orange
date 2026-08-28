@@ -683,11 +683,25 @@ export default function GenerateScreen({ meta, onClose, onOpenTopic, onGenerated
           />
 
           <div className="gen-actions">
-            <button className="gen-go" onClick={start} disabled={active || starting || blocked}>
+            <button className="gen-go" onClick={start} disabled={active || starting || blocked}
+                    title={(blocked && options?.reason) || undefined}>
               {active ? <><span className="spinner" /> Generating…</>
                 : starting ? 'Starting…'
                 : `Generate ${count} space${count === 1 ? '' : 's'}`}
             </button>
+            {/* The reason a disabled control is disabled has to be AT the control.
+                It was already on screen, but at the top of a page whose scroll
+                height is the whole constraint rail — so the reader arrives at a
+                greyed button having lost the explanation, and the only theory
+                left is that some combination of parameters would enable it.
+                Nothing here will: readiness is a property of the deployment. */}
+            {blocked && !active && (
+              <span className="gen-quiet">
+                No combination of these will enable it — generation is unavailable in
+                this deployment, not blocked by what you have selected. See the note
+                at the top of the screen.
+              </span>
+            )}
             {active && (
               <span className="gen-quiet">
                 One run at a time — synthesis writes opportunity spaces, and the identity rule

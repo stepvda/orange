@@ -14,3 +14,7 @@ shared rendering helpers remain in `docs/_build/`.
 
 See [`../DOCUMENTATION.md`](../DOCUMENTATION.md) for the complete build order and
 prerequisites.
+
+`build_next_steps.py` is self-contained — it carries the house Word style rather
+than importing it, and reads its figures from `data/radar.db` when one is
+present, falling back to a recorded snapshot and saying so on the cover.

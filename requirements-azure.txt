@@ -1,15 +1,19 @@
-# Runtime dependencies for the App Service deployment — the READ path only.
+# Runtime dependencies for the App Service deployment.
 #
-# The pipeline's heavy dependencies are deliberately absent. `radar.api` imports
-# none of them: sentence-transformers, scikit-learn and the OpenAI client are all
-# imported inside the functions that need them (see embeddings.py and llm.py), so
-# a serving instance never loads torch. That is the difference between a 150 MB
-# deployment and a 2.5 GB one, and on the Free tier it is the difference between
-# starting and not.
+# This file used to carry the READ path only, and said so: the encoder was left
+# out because torch is "the difference between a 150 MB deployment and a 2.5 GB
+# one, and on the Free tier the difference between starting and not". That was
+# measured and true — 1.09 GB of packages and model against 611 MB of free disk
+# and 524 MB of free RAM on F1 — and it is why the Generate screen was disabled
+# in the deployed app while working locally.
 #
-# Discovery (collect, classify, themes, synthesise) is not run in Azure: it is a
-# scheduled batch job against the same SQLite file, run locally or from CI, and
-# the deployed app serves what it produced.
+# The plan is now B1 (10 GB disk, 1.75 GB RAM, Always On), so the encoder ships
+# and generation runs in Azure. Everything below the read path is still imported
+# lazily (embeddings.py, llm.py, themes.py), so a request that only serves the
+# radar still never loads torch — the cost is disk, not per-request memory.
+#
+# Discovery (collect, classify, themes) remains a batch job run locally against
+# the same SQLite file; what changed is that SYNTHESIS no longer has to be.
 
 fastapi>=0.110
 uvicorn[standard]>=0.29
@@ -29,3 +33,24 @@ python-docx>=1.1
 # Only used when a description or brief is generated on demand from the UI.
 # OpenAI-compatible client; the provider is whatever RADAR_LLM_PROVIDER names.
 openai>=1.40
+
+# --- the encoder, for generation (§4.4.5) ---------------------------------
+#
+# CPU-ONLY torch, and the extra index is load-bearing: `pip install torch` on
+# Linux resolves to the CUDA build and drags in ~2.5 GB of nvidia-* wheels for a
+# machine with no GPU. The `+cpu` local version exists only on PyTorch's own
+# index, so naming it here is what pins the resolution.
+#
+# 2.6.0 rather than the 2.10 used locally: that index publishes cp313 CPU wheels
+# up to 2.6.0, and App Service runs Python 3.13.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+
+# Encodes to the SAME 384-dimensional vectors already stored against every
+# signal. That is the whole point of shipping the real model rather than a
+# smaller substitute: the stored embeddings came from this model, and a
+# different encoder's output cannot be compared against them at all.
+sentence-transformers>=2.7
+
+# AgglomerativeClustering (themes.py) and the TF-IDF fallback (embeddings.py).
+scikit-learn>=1.4
