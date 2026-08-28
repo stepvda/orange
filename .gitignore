@@ -52,3 +52,14 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Office lock files. Word and PowerPoint write a `~$name.docx` owner file beside
+# any document that is open, and delete it on close. It is a few hundred bytes of
+# session state, never content — one was committed in August alongside a deck that
+# happened to be open at the time.
+~$*
+
+# Scratch dump left beside the docs. Kept on disk, not in the repository: the
+# prose in it is generated per space by the pipeline, so the file is a copy of an
+# output rather than a source.
+docs/tmp.txt
