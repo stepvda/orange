@@ -44,7 +44,7 @@ openai>=1.40
 # 2.6.0 rather than the 2.10 used locally: that index publishes cp313 CPU wheels
 # up to 2.6.0, and App Service runs Python 3.13.
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.6.0+cpu
+torch==2.12.1+cpu
 
 # Encodes to the SAME 384-dimensional vectors already stored against every
 # signal. That is the whole point of shipping the real model rather than a
