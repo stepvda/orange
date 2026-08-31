@@ -2,6 +2,12 @@
 
 ## Reference guides
 
+- [Interview guide](INTERVIEW_GUIDE.md)
+- [Getting started and architecture](GETTING_STARTED_AND_ARCHITECTURE.md)
+- [Implementation guide](IMPLEMENTATION_GUIDE.md)
+- [Build status and data sources](DATA_SOURCES_AND_STATUS.md)
+- [Frontend and deployment](FRONTEND_AND_DEPLOYMENT.md)
+- [Quality, limitations, and security](QUALITY_LIMITATIONS_AND_SECURITY.md)
 - [Scoring formulas and hand-calculation guide](SCORING_FORMULAS.md)
 
 *Start with the [project README](../README.md) for what the radar is and how to
