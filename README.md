@@ -86,6 +86,7 @@ you need directly:
 | [Operations guide](docs/OPERATIONS.md) | Running, refreshing, troubleshooting, and rebuilding documentation |
 | [Architecture decisions](docs/DECISIONS.md) | Important technical and product trade-offs |
 | [Changelog](docs/CHANGELOG.md) | Features, fixes, and instructive defects |
+| [Final presentation](<docs/Orange_Innovation_Radar (final slides with speaker notes).pptx>) | Final project slides with speaker notes |
 
 The full Functional Design Document, Technical Architecture, requirements
 baseline, presentations, and demonstrations are listed in the documentation
