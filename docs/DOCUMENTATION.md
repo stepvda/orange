@@ -9,6 +9,7 @@
 - [Frontend and deployment](FRONTEND_AND_DEPLOYMENT.md)
 - [Quality, limitations, and security](QUALITY_LIMITATIONS_AND_SECURITY.md)
 - [Scoring formulas and hand-calculation guide](SCORING_FORMULAS.md)
+- [Project timeline and time-tracking](TIMELINES.md)
 
 *Start with the [project README](../README.md) for what the radar is and how to
 run it. This folder is the reference material.*

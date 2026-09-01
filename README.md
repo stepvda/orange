@@ -4,17 +4,32 @@ An evidence-first innovation radar that discovers specific business
 opportunities, explains why they matter, connects them to Orange Business
 capabilities, and turns them into actionable sales and portfolio material.
 
-An opportunity space is identified by **Vertical × Use Case × Technology** and
-is evaluated through separate quantities:
+MVP implementation of the requirements baseline in
+[`Orange_Innovation_Radar_Requirements_and_Approach.docx`](docs/Orange_Innovation_Radar_Requirements_and_Approach.docx).
+
+## What an opportunity space is
+
+An opportunity space is **Vertical × Use Case × Technology** with a
+human-readable statement. Each one carries two scores that are never combined:
 
 - **Attractiveness** — is the external market moving?
 - **Right to Win** — can Orange play and win?
+
+Beside them, and never folded into either, sit two further quantities:
+
 - **Conviction** — do internal teams believe in it?
 - **Competitive intensity** — how crowded is the field?
 
 The system keeps these questions separate, stores the evidence and inputs behind
 every result, and exposes the calculation rather than asking users to trust an
 opaque score.
+
+Each space also carries a **market size** computed bottom-up from published
+statistics, a written description bound to its own evidence, a **competitor
+analysis** saying what each named competitor is doing there and how Orange
+differentiates against each of them, and a **PDF brief** a salesperson can take
+into a meeting. Every claim is bound to a dated, attributable source, and every
+number decomposes into named components.
 
 ## What it does
 
@@ -27,6 +42,16 @@ opaque score.
    certifications, and capabilities.
 6. Produces market sizing, competitor analysis, briefs, pre-sales collateral,
    workflow views, and constrained portfolio plans.
+
+## The pre-sales pack
+
+Beyond the brief, each space carries **twelve pieces of pre-sales collateral**
+for the work between the first meeting and a proposal — qualification, a
+solution outline, battlecards, a business case, a PoC scope, tender blocks, a
+risk register and more — each with its own diagrams, and each available as PDF,
+Word or OpenDocument (decks as PowerPoint, OpenDocument or PDF). All twelve are
+built from one snapshot of the space, so nothing in the pack can disagree with
+anything else in it.
 
 ## Why it is different
 
@@ -65,6 +90,10 @@ The application is available at <http://127.0.0.1:5173>. On a new empty
 database, the initial development account is `orange` / `orange`; change this
 password immediately.
 
+Running the pipeline stage by stage, managing accounts from the command line,
+and the full CLI command reference are in the
+[getting started and architecture guide](docs/GETTING_STARTED_AND_ARCHITECTURE.md).
+
 ## Documentation
 
 Start with the [documentation index](docs/DOCUMENTATION.md), or open the topic
@@ -86,11 +115,17 @@ you need directly:
 | [Operations guide](docs/OPERATIONS.md) | Running, refreshing, troubleshooting, and rebuilding documentation |
 | [Architecture decisions](docs/DECISIONS.md) | Important technical and product trade-offs |
 | [Changelog](docs/CHANGELOG.md) | Features, fixes, and instructive defects |
+| [Project timeline](docs/TIMELINES.md) | Retrospective project plan, session log, and working patterns from the commit history |
 | [Final presentation](<docs/Orange_Innovation_Radar (final slides with speaker notes).pptx>) | Final project slides with speaker notes |
 
 The full Functional Design Document, Technical Architecture, requirements
 baseline, presentations, and demonstrations are listed in the documentation
 index.
+
+Section references used throughout that documentation (§4.5.3, SC-13, FR-30 …)
+point at the requirements document. They are also carried in the code as
+comments, so any given behaviour can be traced back to the requirement that
+asked for it.
 
 ## Team and contributions
 
