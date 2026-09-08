@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- SVG first for the browsers that take it (it stays sharp at every tab
+         and bookmark size); .ico is the fallback, and is also what a browser
+         requests from /favicon.ico before it has parsed this head. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ff7900" />
     <title>Innovation Radar — Orange Business</title>
   </head>
   <body>

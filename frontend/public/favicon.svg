@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Orange Business Innovation Radar">
+  <!-- The Orange brand mark is a hard-edged orange square, and that is exactly
+       what survives at 16px in a browser tab: one saturated block, no detail to
+       turn to mud. #ff7900 is the brand orange, not the page accent (#f07000),
+       which is darkened for text contrast and reads dull as a solid fill. -->
+  <rect width="64" height="64" fill="#ff7900"/>
+</svg>
